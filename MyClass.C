@@ -71,10 +71,10 @@ void MyClass::Loop()
 
    std::cout << "Processing " << nentries << " entries from Tree." << std::endl;
 
-   // detect if current file is the signal (TTH.root)
+   // detect if current file is the signal (TTH12Gev.root)
    Bool_t isSignal = false;
    TFile *currentFile = fChain->GetCurrentFile();
-   if (currentFile && std::string(currentFile->GetName()).find("TTH.root") != std::string::npos)
+   if (currentFile && std::string(currentFile->GetName()).find("TTH12Gev") != std::string::npos)
       isSignal = true;
 
    //
@@ -216,10 +216,12 @@ void MyClass::Loop()
    TH1F *h_jet_eta = new TH1F("h_jet_eta","Jet #eta; #eta; Entries",       50,-2.5,2.5);
    TH1F *h_jet_phi = new TH1F("h_jet_phi","Jet #phi; #phi; Entries",       64,-3.2,3.2);
 
-   // ranked objects: 6 jets, 2 electrons, 2 muons
-   const int MAXJET = 6;
-   const int MAXELE = 2;
-   const int MAXMU  = 2;
+   // ranked objects: 4 jets, 2 electrons, 2 muons
+   const int MAXJET   = 4;
+   const int MAXELE   = 2;
+   const int MAXMU    = 2;
+   const int MAXBJET  = 2;  // ranked b-jets
+   const int MAXDBJET = 2;  // ranked double-b-tagged jets
 
    TH1F *h_j_pt [MAXJET];
    TH1F *h_j_eta[MAXJET];
@@ -231,24 +233,41 @@ void MyClass::Loop()
       h_j_eta[i] = new TH1F(("h_j" + idx + "_eta").c_str(), ("Jet " + idx + " #eta; #eta; Entries").c_str(),        50,-2.5,2.5);
       h_j_phi[i] = new TH1F(("h_j" + idx + "_phi").c_str(), ("Jet " + idx + " #phi; #phi; Entries").c_str(),        64,-3.2,3.2);
    }
-// --- NEW: B-JET HISTOGRAMS (RECO) ---
-TH1F *h_nBjet     = new TH1F("h_nBjet",     "b-jet multiplicity; N_{bjets}; Entries", 15, 0, 15);
-TH1F *h_bjet_pt   = new TH1F("h_bjet_pt",   "All b-jets p_{T}; p_{T} [GeV]; Entries", 100, 0, 500);
-TH1F *h_bjet_eta  = new TH1F("h_bjet_eta",  "All b-jets #eta; #eta; Entries",         50, -2.5, 2.5);
-TH1F *h_bjet_phi  = new TH1F("h_bjet_phi",  "All b-jets #phi; #phi; Entries",         64, -3.2, 3.2);
 
-// Ranked b-jets (top 6)
-const int MAXBJET = 6;
-TH1F *h_bj_pt [MAXBJET];
-TH1F *h_bj_eta[MAXBJET];
-TH1F *h_bj_phi[MAXBJET];
+   // --- NEW: B-JET HISTOGRAMS (RECO) ---
+   TH1F *h_nBjet    = new TH1F("h_nBjet",    "b-jet multiplicity; N_{bjets}; Entries", 15, 0, 15);
+   TH1F *h_bjet_pt  = new TH1F("h_bjet_pt",  "All b-jets p_{T}; p_{T} [GeV]; Entries", 100, 0, 500);
+   TH1F *h_bjet_eta = new TH1F("h_bjet_eta", "All b-jets #eta; #eta; Entries",         50, -2.5, 2.5);
+   TH1F *h_bjet_phi = new TH1F("h_bjet_phi", "All b-jets #phi; #phi; Entries",         64, -3.2, 3.2);
 
-for (int i = 0; i < MAXBJET; ++i) {
-    std::string idx = std::to_string(i + 1);
-    h_bj_pt[i]  = new TH1F(("h_bj" + idx + "_pt" ).c_str(), ("b-jet " + idx + " p_{T}; p_{T} [GeV]; Entries").c_str(), 100, 0, 500);
-    h_bj_eta[i] = new TH1F(("h_bj" + idx + "_eta").c_str(), ("b-jet " + idx + " #eta; #eta; Entries").c_str(),         50, -2.5, 2.5);
-    h_bj_phi[i] = new TH1F(("h_bj" + idx + "_phi").c_str(), ("b-jet " + idx + " #phi; #phi; Entries").c_str(),         64, -3.2, 3.2);
-}
+   // Ranked b-jets (top 2)
+   TH1F *h_bj_pt [MAXBJET];
+   TH1F *h_bj_eta[MAXBJET];
+   TH1F *h_bj_phi[MAXBJET];
+
+   for (int i = 0; i < MAXBJET; ++i) {
+      std::string idx = std::to_string(i + 1);
+      h_bj_pt[i]  = new TH1F(("h_bj" + idx + "_pt" ).c_str(), ("b-jet " + idx + " p_{T}; p_{T} [GeV]; Entries").c_str(), 100, 0, 500);
+      h_bj_eta[i] = new TH1F(("h_bj" + idx + "_eta").c_str(), ("b-jet " + idx + " #eta; #eta; Entries").c_str(),         50, -2.5, 2.5);
+      h_bj_phi[i] = new TH1F(("h_bj" + idx + "_phi").c_str(), ("b-jet " + idx + " #phi; #phi; Entries").c_str(),         64, -3.2, 3.2);
+   }
+
+   // --- NEW: DOUBLE-B-TAGGED JET HISTOGRAMS (RECO) ---
+   TH1F *h_nDoubleB    = new TH1F("h_nDoubleB",    "double-b jet multiplicity; N_{dbjets}; Entries", 10, 0, 10);
+   TH1F *h_dbjet_pt    = new TH1F("h_dbjet_pt",    "All double-b jets p_{T}; p_{T} [GeV]; Entries",  100, 0, 500);
+   TH1F *h_dbjet_eta   = new TH1F("h_dbjet_eta",   "All double-b jets #eta; #eta; Entries",          50, -2.5, 2.5);
+   TH1F *h_dbjet_phi   = new TH1F("h_dbjet_phi",   "All double-b jets #phi; #phi; Entries",          64, -3.2, 3.2);
+
+   TH1F *h_dbj_pt [MAXDBJET];
+   TH1F *h_dbj_eta[MAXDBJET];
+   TH1F *h_dbj_phi[MAXDBJET];
+
+   for (int i = 0; i < MAXDBJET; ++i) {
+      std::string idx = std::to_string(i + 1);
+      h_dbj_pt[i]  = new TH1F(("h_dbj" + idx + "_pt" ).c_str(), ("double-b jet " + idx + " p_{T}; p_{T} [GeV]; Entries").c_str(), 100, 0, 500);
+      h_dbj_eta[i] = new TH1F(("h_dbj" + idx + "_eta").c_str(), ("double-b jet " + idx + " #eta; #eta; Entries").c_str(),         50, -2.5, 2.5);
+      h_dbj_phi[i] = new TH1F(("h_dbj" + idx + "_phi").c_str(), ("double-b jet " + idx + " #phi; #phi; Entries").c_str(),         64, -3.2, 3.2);
+   }
 
    TH1F *h_e_pt_rank [MAXELE];
    TH1F *h_e_eta_rank[MAXELE];
@@ -283,8 +302,9 @@ for (int i = 0; i < MAXBJET; ++i) {
    Long64_t nCut1 = 0; // N leptons >= 2
    Long64_t nCut2 = 0; // OS lepton pair (e/e, μ/μ, e/μ, μ/e)
    Long64_t nCut3 = 0; // N jets >= 5
-   Long64_t nCut4 = 0; // N b-jets >= 5
-   Long64_t nCut5 = 0; // MET >= 40
+   Long64_t nCut4 = 0; // N b-jets >= 2
+   Long64_t nCut5 = 0; // N double-b-jets >= 2
+   Long64_t nCut6 = 0; // MET >= 40
 
    // Helper for sorting GEN particles by pT
    auto sortParticles = [&](std::vector<int> &indices) {
@@ -595,6 +615,7 @@ for (int i = 0; i < MAXBJET; ++i) {
       std::vector<TLorentzVector> vec_muons;
       std::vector<TLorentzVector> vec_jet;
       std::vector<TLorentzVector> vec_bjets;
+      std::vector<TLorentzVector> vec_doublebjets;
       std::vector<RecoLepton>     leptons;  // for cutflow on leptons
 
       // -----------------------
@@ -641,6 +662,7 @@ for (int i = 0; i < MAXBJET; ++i) {
       // Jet selection
       //  pT > 20 GeV, |eta| < 2.5
       //  b-jet: Jet_btagUParTAK4B > 0.4648
+      //  double-b: Jet_btagUParTAK4probbb > 0.38
       // -----------------------
       for (int i = 0; i < nJet; ++i) {
          float pt  = Jet_pt[i];
@@ -654,8 +676,12 @@ for (int i = 0; i < MAXBJET; ++i) {
          j.SetPtEtaPhiM(pt, eta, phi, Jet_mass[i]);
          vec_jet.push_back(j);
 
-         if (Jet_btagUParTAK4B[i] > 0.4648) {
+         if (Jet_btagUParTAK4B[i] > 0.4648f) {
            vec_bjets.push_back(j);
+         }
+
+         if (Jet_btagUParTAK4probbb[i] > 0.38f) {
+           vec_doublebjets.push_back(j);
          }
       }
 
@@ -664,10 +690,11 @@ for (int i = 0; i < MAXBJET; ++i) {
          return a.Pt() > b.Pt();
       };
 
-      std::sort(vec_ele.begin(),    vec_ele.end(),    cmpPt);
-      std::sort(vec_muons.begin(),  vec_muons.end(),  cmpPt);
-      std::sort(vec_jet.begin(),    vec_jet.end(),    cmpPt);
-      std::sort(vec_bjets.begin(),  vec_bjets.end(),  cmpPt);
+      std::sort(vec_ele.begin(),        vec_ele.end(),        cmpPt);
+      std::sort(vec_muons.begin(),      vec_muons.end(),      cmpPt);
+      std::sort(vec_jet.begin(),        vec_jet.end(),        cmpPt);
+      std::sort(vec_bjets.begin(),      vec_bjets.end(),      cmpPt);
+      std::sort(vec_doublebjets.begin(),vec_doublebjets.end(),cmpPt);
 
       std::sort(leptons.begin(), leptons.end(),
                 [](const RecoLepton &a, const RecoLepton &b) {
@@ -679,9 +706,11 @@ for (int i = 0; i < MAXBJET; ++i) {
       // -----------------------
 
       // multiplicities
-      h_nEle->Fill(vec_ele.size(),   weight);
-      h_nMu ->Fill(vec_muons.size(), weight);
-      h_nJet->Fill(vec_jet.size(),   weight);
+      h_nEle->Fill(vec_ele.size(),        weight);
+      h_nMu ->Fill(vec_muons.size(),      weight);
+      h_nJet->Fill(vec_jet.size(),        weight);
+      h_nBjet->Fill(vec_bjets.size(),     weight);
+      h_nDoubleB->Fill(vec_doublebjets.size(), weight);
 
       // all selected electrons
       for (const auto &el : vec_ele) {
@@ -702,6 +731,20 @@ for (int i = 0; i < MAXBJET; ++i) {
          h_jet_pt ->Fill(jet.Pt(),  weight);
          h_jet_eta->Fill(jet.Eta(), weight);
          h_jet_phi->Fill(jet.Phi(), weight);
+      }
+
+      // all selected b-jets
+      for (const auto &bj : vec_bjets) {
+         h_bjet_pt ->Fill(bj.Pt(),  weight);
+         h_bjet_eta->Fill(bj.Eta(), weight);
+         h_bjet_phi->Fill(bj.Phi(), weight);
+      }
+
+      // all selected double-b-tagged jets
+      for (const auto &dbj : vec_doublebjets) {
+         h_dbjet_pt ->Fill(dbj.Pt(),  weight);
+         h_dbjet_eta->Fill(dbj.Eta(), weight);
+         h_dbjet_phi->Fill(dbj.Phi(), weight);
       }
 
       // ranked electrons (up to MAXELE)
@@ -733,27 +776,25 @@ for (int i = 0; i < MAXBJET; ++i) {
            h_j_phi[i]->Fill(vec_jet[i].Phi(), weight);
          }
       }
-      // -----------------------
-      // NEW: B-JET ANALYSIS
-      // -----------------------
 
-      h_nBjet->Fill(vec_bjets.size(), weight);
-
-      // Fill all b-jets
-      for (const auto &bj : vec_bjets) {
-	h_bjet_pt ->Fill(bj.Pt(),  weight);
-	h_bjet_eta->Fill(bj.Eta(), weight);
-	h_bjet_phi->Fill(bj.Phi(), weight);
+      // ranked b-jets (up to MAXBJET)
+      {
+         const int maxB = std::min<int>(vec_bjets.size(), MAXBJET);
+         for (int i = 0; i < maxB; ++i) {
+           h_bj_pt[i] ->Fill(vec_bjets[i].Pt(),  weight);
+           h_bj_eta[i]->Fill(vec_bjets[i].Eta(), weight);
+           h_bj_phi[i]->Fill(vec_bjets[i].Phi(), weight);
+         }
       }
 
-      // Fill ranked b-jets (already sorted by pT)
+      // ranked double-b-tagged jets (up to MAXDBJET)
       {
-	const int maxB = std::min<int>(vec_bjets.size(), MAXBJET);
-	for (int i = 0; i < maxB; ++i) {
-	  h_bj_pt[i] ->Fill(vec_bjets[i].Pt(),  weight);
-	  h_bj_eta[i]->Fill(vec_bjets[i].Eta(), weight);
-	  h_bj_phi[i]->Fill(vec_bjets[i].Phi(), weight);
-	}
+         const int maxDB = std::min<int>(vec_doublebjets.size(), MAXDBJET);
+         for (int i = 0; i < maxDB; ++i) {
+           h_dbj_pt[i] ->Fill(vec_doublebjets[i].Pt(),  weight);
+           h_dbj_eta[i]->Fill(vec_doublebjets[i].Eta(), weight);
+           h_dbj_phi[i]->Fill(vec_doublebjets[i].Phi(), weight);
+         }
       }
 
       // -----------------------
@@ -763,6 +804,7 @@ for (int i = 0; i < MAXBJET; ++i) {
       const int Nleptons = leptons.size();
       const int Njets    = vec_jet.size();
       const int Nbjets   = vec_bjets.size();
+      const int Ndoubleb = vec_doublebjets.size();
 
       // Cut 1: at least 2 leptons (e or μ)
       if (Nleptons < 2) continue;
@@ -783,16 +825,20 @@ for (int i = 0; i < MAXBJET; ++i) {
       ++nCut2;
 
       // Cut 3: at least 5 jets
-      if (Njets < 5) continue;
+      if (Njets < 4) continue;
       ++nCut3;
 
-      // Cut 4: at least 5 b-tagged jets
-      if (Nbjets < 5) continue;
+      // Cut 4: at least 2 b-tagged jets
+      if (Nbjets < 2) continue;
       ++nCut4;
 
-      // Cut 5: MET >= 40 GeV
-      if (PuppiMET_pt < 40.0) continue;
+      // Cut 5: at least 2 double-b-tagged jets
+      if (Ndoubleb < 2) continue;
       ++nCut5;
+
+      // Cut 6: MET >= 40 GeV
+      if (PuppiMET_pt < 40.0) continue;
+      ++nCut6;
 
       // START REAL ANALYSIS: Calculate the event-level kinematic variables
       // (you can add more here as needed)
@@ -816,8 +862,7 @@ for (int i = 0; i < MAXBJET; ++i) {
    std::cout << " BR(W->lnu)^2         = " << fmt3(Br_Wlnu * Br_Wlnu) << "\n";
    std::cout << " L                    = " << L_int             << " fb^-1\n";
    std::cout << " -------------------------------------------\n";
-   std::cout << " Nexp (expected)      = " << fmt3(Nexp)        << " events\n";
-   std::cout << " Nexp (rounded int)   = " << Nexp_int          << " events\n";
+   std::cout << " Nexp                 = " << Nexp_int          << " events\n";
    std::cout << " Nstat (MC)           = " << fmt3(Nstat)       << " events\n";
    std::cout << " per-event weight w   = Nexp/Nstat = " << fmt3(w) << "\n";
    std::cout << "=============================================================\n\n";
@@ -861,22 +906,28 @@ for (int i = 0; i < MAXBJET; ++i) {
              << std::setw(15) << eff_decimal(nCut2) << std::endl;
 
    // Step 3
-   std::cout << std::left << std::setw(35) << "Step 3) N jets >= 5"
+   std::cout << std::left << std::setw(35) << "Step 3) N jets >= 4"
              << std::setw(15) << nCut3
              << std::setw(15) << fmt3(static_cast<double>(nCut3) * w)
              << std::setw(15) << eff_decimal(nCut3) << std::endl;
 
    // Step 4
-   std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 5"
+   std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 2"
              << std::setw(15) << nCut4
              << std::setw(15) << fmt3(static_cast<double>(nCut4) * w)
              << std::setw(15) << eff_decimal(nCut4) << std::endl;
 
    // Step 5
-   std::cout << std::left << std::setw(35) << "Step 5) MET >= 40 GeV"
+   std::cout << std::left << std::setw(35) << "Step 5) N double-b-jets >= 2"
              << std::setw(15) << nCut5
              << std::setw(15) << fmt3(static_cast<double>(nCut5) * w)
              << std::setw(15) << eff_decimal(nCut5) << std::endl;
+
+   // Step 6
+   std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
+             << std::setw(15) << nCut6
+             << std::setw(15) << fmt3(static_cast<double>(nCut6) * w)
+             << std::setw(15) << eff_decimal(nCut6) << std::endl;
 
    std::cout << "=============================================================\n";
 
