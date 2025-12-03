@@ -73,14 +73,14 @@ public :
    UChar_t         PV_npvsGood;
    UChar_t         PV_npvs;
    Int_t           nGenPart;
-   Float_t         GenPart_eta[174];   //[nGenPart]
-   Float_t         GenPart_mass[174];   //[nGenPart]
-   Short_t         GenPart_genPartIdxMother[174];   //[nGenPart]
-   Int_t           GenPart_pdgId[174];   //[nGenPart]
-   Float_t         GenPart_phi[174];   //[nGenPart]
-   Float_t         GenPart_pt[174];   //[nGenPart]
-   Int_t           GenPart_status[174];   //[nGenPart]
-   UShort_t        GenPart_statusFlags[174];   //[nGenPart]
+   Float_t         GenPart_eta[1000];   //[nGenPart]
+   Float_t         GenPart_mass[1000];   //[nGenPart]
+   Short_t         GenPart_genPartIdxMother[1000];   //[nGenPart]
+   Int_t           GenPart_pdgId[1000];   //[nGenPart]
+   Float_t         GenPart_phi[1000];   //[nGenPart]
+   Float_t         GenPart_pt[1000];   //[nGenPart]
+   Int_t           GenPart_status[1000];   //[nGenPart]
+   UShort_t        GenPart_statusFlags[1000];   //[nGenPart]
 
    // List of branches
    TBranch        *b_run;   //!
@@ -162,9 +162,9 @@ MyClass::MyClass(TTree *tree) : fChain(0)
 // if parameter tree is not specified (or zero), connect the file
 // used to generate this class and read the Tree.
    if (tree == 0) {
-      TFile *f = (TFile*)gROOT->GetListOfFiles()->FindObject("TTH.root");
+      TFile *f = (TFile*)gROOT->GetListOfFiles()->FindObject("TTH12Gev.root");
       if (!f || !f->IsOpen()) {
-         f = new TFile("TTH.root");
+         f = new TFile("TTH12Gev.root");
       }
       f->GetObject("Events",tree);
 
