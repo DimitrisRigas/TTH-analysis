@@ -38,7 +38,7 @@ void drawWithStat(TH1F* h) {
 
 void myplot() {
 
-    TFile *f = TFile::Open("ttH_aab_final_output.root");
+    TFile *f = TFile::Open("output_signal.root");
     if (!f || f->IsZombie()) {
         std::cout << "Error: Cannot open ROOT file." << std::endl;
         return;
