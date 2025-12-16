@@ -379,6 +379,41 @@ void MyClass::Loop()
    TH1F *h_HT = new TH1F("h_HT",
                          "H_{T} scalar sum of jet p_{T}; H_{T} [GeV]; Entries",
                          100, 0, 2000);
+   // ==========================================================
+   // NEW: FINAL RECO B-JET KINEMATICS (after full selection)
+   // ==========================================================
+
+   TH1F *h_bj1_pt_final = new TH1F(
+				   "h_bj1_pt_final",
+				   "Leading b-jet p_{T} (final); p_{T} [GeV]; Entries",
+				   100, 0, 500
+				   );
+
+   TH1F *h_bj1_eta_final = new TH1F(
+				    "h_bj1_eta_final",
+				    "Leading b-jet #eta (final); #eta; Entries",
+				    60, -2.5, 2.5
+				    );
+
+   TH1F *h_bj2_pt_final = new TH1F(
+				   "h_bj2_pt_final",
+				   "Subleading b-jet p_{T} (final); p_{T} [GeV]; Entries",
+				   100, 0, 500
+				   );
+
+   TH1F *h_bj2_eta_final = new TH1F(
+				    "h_bj2_eta_final",
+				    "Subleading b-jet #eta (final); #eta; Entries",
+				    60, -2.5, 2.5
+				    );
+
+   // Δm = | m(bj1) - m(bj2) |
+   TH1F *h_dM_bj12 = new TH1F(
+			      "h_dM_bj12_final",
+			      "|m_{b1} - m_{b2}| (final); #Delta m [GeV]; Entries",
+			      80, 0, 200
+			      );
+
 
    // ==========================================================
    // NEW REAL-ANALYSIS HISTOGRAMS (after full selection)
@@ -948,7 +983,7 @@ void MyClass::Loop()
       // =====================================================================
       // REAL ANALYSIS (FINAL SELECTION): FILL ONLY (NO DECLARATIONS)
       // =====================================================================
-
+      //double bjet,Higgs and Met kinematic variables
       const TLorentzVector &db1 = vec_doublebjets[0];
       const TLorentzVector &db2 = vec_doublebjets[1];
 
@@ -964,6 +999,10 @@ void MyClass::Loop()
       h_dbj1_mass->Fill(db1.M(), weight);
       h_dbj2_mass->Fill(db2.M(), weight);
 
+      // Δm(double-b, double-b)
+      const double dM_dbj = std::fabs(db1.M() - db2.M());
+      h_dM_bj12->Fill(dM_dbj, weight);
+      
       h_dbj1_pt ->Fill(db1.Pt(),  weight);
       h_dbj1_eta->Fill(db1.Eta(), weight);
 
@@ -987,7 +1026,16 @@ void MyClass::Loop()
       h_lep2_pt ->Fill(l2.p4.Pt(),  weight);
       h_lep2_eta->Fill(l2.p4.Eta(), weight);
       h_lep2_phi->Fill(l2.p4.Phi(), weight);
+      // --- FINAL b-jet kinematics ---
+      const TLorentzVector &bj1 = vec_bjets[0];
+      const TLorentzVector &bj2 = vec_bjets[1];
 
+      h_bj1_pt_final ->Fill(bj1.Pt(),  weight);
+      h_bj1_eta_final->Fill(bj1.Eta(), weight);
+
+      h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
+      h_bj2_eta_final->Fill(bj2.Eta(), weight);
+ 
    } // end event loop
 
    // ========================================================================
