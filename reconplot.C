@@ -8,37 +8,32 @@
 
 void reconplot(int mode = 1, int sample = 0) {
 
-
     gStyle->SetOptStat(1111);
 
     // =======================================
     // Select input file by sample
-    // sample = 0 → signal
-    // sample = 1 → ttbar background
     // =======================================
-
     std::string fname;
 
     if (sample == 0)
-      fname = "output_signal.root";
+        fname = "output_signal.root";
     else if (sample == 1)
-      fname = "output_ttbar.root";
+        fname = "output_ttbar.root";
     else {
-      std::cout << "ERROR: Unknown sample code! Use 0 (signal) or 1 (ttbar)." << std::endl;
-      return;
+        std::cout << "ERROR: Unknown sample code!" << std::endl;
+        return;
     }
 
     TFile *f = TFile::Open(fname.c_str());
     if (!f || f->IsZombie()) {
-      std::cout << "ERROR: Could not open " << fname << "!" << std::endl;
-      return;
+        std::cout << "ERROR: Could not open " << fname << std::endl;
+        return;
     }
 
     std::cout << "Loaded file: " << fname << std::endl;
 
-
-    auto H = [&](std::string name) -> TH1F* {
-        TH1F *h = (TH1F*)f->Get(name.c_str());
+    auto H = [&](const char *name) -> TH1F* {
+        TH1F *h = (TH1F*)f->Get(name);
         if (!h) std::cout << "WARNING: Missing histogram " << name << std::endl;
         return h;
     };
@@ -46,157 +41,118 @@ void reconplot(int mode = 1, int sample = 0) {
     std::string tag = "_raw";
 
     // =====================================================================
-    // MODE 1 → OBJECT-LEVEL RECO PLOTS (WITH ΔR CLEANING BACK)
+    // MODE 1 → OBJECT-LEVEL RECO
     // =====================================================================
     if (mode == 1) {
 
         // ================= ELECTRONS =================
-        TCanvas *c_ele = new TCanvas("c_ele", ("Electrons" + tag).c_str(), 1600, 900);
+        TCanvas *c_ele = new TCanvas("c_ele", "Electrons", 1600, 900);
         c_ele->Divide(3, 2);
 
-        c_ele->cd(1); H("h_e1_pt")->Draw("HIST"); gPad->SetGrid();
-        c_ele->cd(2); H("h_e1_eta")->Draw("HIST"); gPad->SetGrid();
-        c_ele->cd(3); H("h_e1_phi")->Draw("HIST"); gPad->SetGrid();
-
-        c_ele->cd(4); H("h_e2_pt")->Draw("HIST"); gPad->SetGrid();
-        c_ele->cd(5); H("h_e2_eta")->Draw("HIST"); gPad->SetGrid();
-        c_ele->cd(6); H("h_e2_phi")->Draw("HIST"); gPad->SetGrid();
+        c_ele->cd(1); if (auto h = H("h_e1_pt"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_ele->cd(2); if (auto h = H("h_e1_eta")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_ele->cd(3); if (auto h = H("h_e1_phi")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_ele->cd(4); if (auto h = H("h_e2_pt"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_ele->cd(5); if (auto h = H("h_e2_eta")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_ele->cd(6); if (auto h = H("h_e2_phi")) { h->Draw("HIST"); gPad->SetGrid(); }
 
         c_ele->SaveAs(("electrons" + tag + ".png").c_str());
 
         // ================= MUONS =================
-        TCanvas *c_mu = new TCanvas("c_mu", ("Muons" + tag).c_str(), 1600, 900);
+        TCanvas *c_mu = new TCanvas("c_mu", "Muons", 1600, 900);
         c_mu->Divide(3, 2);
 
-        c_mu->cd(1); H("h_mu1_pt")->Draw("HIST"); gPad->SetGrid();
-        c_mu->cd(2); H("h_mu1_eta")->Draw("HIST"); gPad->SetGrid();
-        c_mu->cd(3); H("h_mu1_phi")->Draw("HIST"); gPad->SetGrid();
-
-        c_mu->cd(4); H("h_mu2_pt")->Draw("HIST"); gPad->SetGrid();
-        c_mu->cd(5); H("h_mu2_eta")->Draw("HIST"); gPad->SetGrid();
-        c_mu->cd(6); H("h_mu2_phi")->Draw("HIST"); gPad->SetGrid();
+        c_mu->cd(1); if (auto h = H("h_mu1_pt"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_mu->cd(2); if (auto h = H("h_mu1_eta")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_mu->cd(3); if (auto h = H("h_mu1_phi")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_mu->cd(4); if (auto h = H("h_mu2_pt"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_mu->cd(5); if (auto h = H("h_mu2_eta")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_mu->cd(6); if (auto h = H("h_mu2_phi")) { h->Draw("HIST"); gPad->SetGrid(); }
 
         c_mu->SaveAs(("muons" + tag + ".png").c_str());
 
-        // ================= JETS (J1–J4) =================
-        TCanvas *c_jet = new TCanvas("c_jet", ("Jets" + tag).c_str(), 1600, 1200);
+        // ================= JETS =================
+        TCanvas *c_jet = new TCanvas("c_jet", "Jets", 1600, 1200);
         c_jet->Divide(3, 4);
 
         for (int i = 1; i <= 4; ++i) {
-            c_jet->cd(3*(i-1) + 1); H(Form("h_j%d_pt",  i))->Draw("HIST"); gPad->SetGrid();
-            c_jet->cd(3*(i-1) + 2); H(Form("h_j%d_eta", i))->Draw("HIST"); gPad->SetGrid();
-            c_jet->cd(3*(i-1) + 3); H(Form("h_j%d_phi", i))->Draw("HIST"); gPad->SetGrid();
+            c_jet->cd(3*(i-1)+1); if (auto h = H(Form("h_j%d_pt",i)))  { h->Draw("HIST"); gPad->SetGrid(); }
+            c_jet->cd(3*(i-1)+2); if (auto h = H(Form("h_j%d_eta",i))) { h->Draw("HIST"); gPad->SetGrid(); }
+            c_jet->cd(3*(i-1)+3); if (auto h = H(Form("h_j%d_phi",i))) { h->Draw("HIST"); gPad->SetGrid(); }
         }
 
         c_jet->SaveAs(("jets" + tag + ".png").c_str());
 
-        // ================= MULTIPLICITIES =================
-        TCanvas *c_mult = new TCanvas("c_mult", ("Multiplicities" + tag).c_str(), 1800, 600);
-        c_mult->Divide(5, 1);
+        // ================= ΔR CLEANING =================
+        TCanvas *c_dR = new TCanvas("c_dRclean", "Jet–Lepton ΔR", 1600, 1200);
+        c_dR->Divide(2, 2);
 
-        c_mult->cd(1); H("h_nEle")->Draw("HIST");   gPad->SetGrid();
-        c_mult->cd(2); H("h_nMu")->Draw("HIST");    gPad->SetGrid();
-        c_mult->cd(3); H("h_nJet")->Draw("HIST");   gPad->SetGrid();
-        c_mult->cd(4); H("h_nCJet")->Draw("HIST");  gPad->SetGrid();
-        c_mult->cd(5); H("h_nBjet")->Draw("HIST");  gPad->SetGrid();
+        c_dR->cd(1); if (auto h = H("h_dR_jet_ele_before")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_dR->cd(2); if (auto h = H("h_dR_jet_mu_before"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_dR->cd(3); if (auto h = H("h_dR_jet_ele_after"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_dR->cd(4); if (auto h = H("h_dR_jet_mu_after"))   { h->Draw("HIST"); gPad->SetGrid(); }
 
-        c_mult->SaveAs(("multiplicity" + tag + ".png").c_str());
+        c_dR->SaveAs("dR_jet_lepton_before_after.png");
 
-        // ================= RANKED B-JETS =================
-        TCanvas *c_bjets2 = new TCanvas("c_bjets2", ("2 leading b-jets" + tag).c_str(), 1600, 900);
-        c_bjets2->Divide(3, 2);
-
-        c_bjets2->cd(1); H("h_bj1_pt")->Draw("HIST");  gPad->SetGrid();
-        c_bjets2->cd(2); H("h_bj1_eta")->Draw("HIST"); gPad->SetGrid();
-        c_bjets2->cd(3); H("h_bj1_phi")->Draw("HIST"); gPad->SetGrid();
-
-        c_bjets2->cd(4); H("h_bj2_pt")->Draw("HIST");  gPad->SetGrid();
-        c_bjets2->cd(5); H("h_bj2_eta")->Draw("HIST"); gPad->SetGrid();
-        c_bjets2->cd(6); H("h_bj2_phi")->Draw("HIST"); gPad->SetGrid();
-
-        c_bjets2->SaveAs(("bjets_ranked2" + tag + ".png").c_str());
-
-        // ================= RANKED DOUBLE-B JETS =================
-        TCanvas *c_dbj2 = new TCanvas("c_dbj2", ("2 leading double-b-tagged jets" + tag).c_str(), 1600, 900);
-        c_dbj2->Divide(3, 2);
-
-        c_dbj2->cd(1); H("h_dbj1_pt")->Draw("HIST");  gPad->SetGrid();
-        c_dbj2->cd(2); H("h_dbj1_eta")->Draw("HIST"); gPad->SetGrid();
-        c_dbj2->cd(3); H("h_dbj1_phi")->Draw("HIST"); gPad->SetGrid();
-
-        c_dbj2->cd(4); H("h_dbj2_pt")->Draw("HIST");  gPad->SetGrid();
-        c_dbj2->cd(5); H("h_dbj2_eta")->Draw("HIST"); gPad->SetGrid();
-        c_dbj2->cd(6); H("h_dbj2_phi")->Draw("HIST"); gPad->SetGrid();
-
-        c_dbj2->SaveAs(("doublebjets_ranked2" + tag + ".png").c_str());
-
-        // ============================================================
-        // ✅ ΔR(jet, lepton) BEFORE & AFTER CLEANING (RESTORED)
-        // ============================================================
-        TCanvas *c_dRclean = new TCanvas("c_dRclean", "Jet–Lepton ΔR (Before/After Cleaning)", 1600, 1200);
-        c_dRclean->Divide(2, 2);
-
-        c_dRclean->cd(1); H("h_dR_jet_ele_before")->Draw("HIST"); gPad->SetGrid();
-        c_dRclean->cd(2); H("h_dR_jet_mu_before")->Draw("HIST");  gPad->SetGrid();
-        c_dRclean->cd(3); H("h_dR_jet_ele_after")->Draw("HIST");  gPad->SetGrid();
-        c_dRclean->cd(4); H("h_dR_jet_mu_after")->Draw("HIST");   gPad->SetGrid();
-
-        c_dRclean->SaveAs("dR_jet_lepton_before_after.png");
-
-        std::cout << "\nAll PNGs saved for MODE 1.\n";
         return;
     }
 
     // =====================================================================
-    // MODE 2 → FULL HIGGS + DOUBLE-B RECONSTRUCTION (FINAL)
+    // MODE 2 → FINAL RECONSTRUCTION
     // =====================================================================
     if (mode == 2) {
 
-        // ================= HIGGS MASS, pT, η =================
-        TCanvas *c_h = new TCanvas("c_h", "Higgs_reco", 1600, 900);
-        c_h->Divide(3, 1);
+        // ================= HIGGS =================
+        TCanvas *c_h = new TCanvas("c_h", "Higgs", 1600, 900);
+        c_h->Divide(3,1);
 
-        c_h->cd(1); H("h_Hdbb_mass")->Draw("HIST"); gPad->SetGrid();
-        c_h->cd(2); H("h_Hdbb_pt")->Draw("HIST");   gPad->SetGrid();
-        c_h->cd(3); H("h_Hdbb_eta")->Draw("HIST");  gPad->SetGrid();
+        c_h->cd(1); if (auto h = H("h_Hdbb_mass")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_h->cd(2); if (auto h = H("h_Hdbb_pt"))   { h->Draw("HIST"); gPad->SetGrid(); }
+        c_h->cd(3); if (auto h = H("h_Hdbb_eta"))  { h->Draw("HIST"); gPad->SetGrid(); }
 
-        c_h->SaveAs("Higgs_reco_mass_pt_eta.png");
+        c_h->SaveAs("Higgs_reco.png");
+	// ================= DOUBLE-B JETS (ALL KINEMATICS, 4x2) =================
+	TCanvas *c_dbk = new TCanvas("c_dbk", "DoubleB jets", 2000, 1000);
+	c_dbk->Divide(4, 2);
 
-        // ================= MET =================
-        TCanvas *c_met = new TCanvas("c_met", "MET_final", 1200, 600);
-        c_met->Divide(2, 1);
+	// --- double-b jet 1 ---
+	c_dbk->cd(1); if (auto h = H("h_dbj1_mass"))      { h->Draw("HIST"); gPad->SetGrid(); }
+	c_dbk->cd(2); if (auto h = H("h_dbj1_pt"))        { h->Draw("HIST"); gPad->SetGrid(); }
+	c_dbk->cd(3); if (auto h = H("h_dbj1_eta"))       { h->Draw("HIST"); gPad->SetGrid(); }
+	c_dbk->cd(4); if (auto h = H("h_dbj1_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
 
-        c_met->cd(1); H("h_MET_pt_final")->Draw("HIST");  gPad->SetGrid();
-        c_met->cd(2); H("h_MET_phi_final")->Draw("HIST"); gPad->SetGrid();
+	// --- double-b jet 2 ---
+	c_dbk->cd(5); if (auto h = H("h_dbj2_mass"))      { h->Draw("HIST"); gPad->SetGrid(); }
+	c_dbk->cd(6); if (auto h = H("h_dbj2_pt"))        { h->Draw("HIST"); gPad->SetGrid(); }
+	c_dbk->cd(7); if (auto h = H("h_dbj2_eta"))       { h->Draw("HIST"); gPad->SetGrid(); }
+	c_dbk->cd(8); if (auto h = H("h_dbj2_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
 
-        c_met->SaveAs("MET_final.png");
+	c_dbk->SaveAs("doubleb_all_kinematics.png");
 
-        // ============================================================
-        // ✅ DOUBLE-B MASS + pT + η (ALL IN ONE CANVAS)
-        // ============================================================
-        TCanvas *c_dbk = new TCanvas("c_dbk", "DoubleB_kinematics_and_mass", 1800, 1000);
-        c_dbk->Divide(3, 2);
 
-        c_dbk->cd(1); H("h_dbj1_mass")->Draw("HIST"); gPad->SetGrid();
-        c_dbk->cd(2); H("h_dbj1_pt")->Draw("HIST");   gPad->SetGrid();
-        c_dbk->cd(3); H("h_dbj1_eta")->Draw("HIST");  gPad->SetGrid();
+        // ================= ΔR(db1,db2) =================
+        if (auto h = H("h_dR_dbj12_final")) {
+            TCanvas *c_dRdb = new TCanvas("c_dRdb", "DeltaR db1 db2", 1000, 800);
+            h->Draw("HIST");
+            gPad->SetGrid();
+            c_dRdb->SaveAs("DeltaR_dbj1_dbj2.png");
+        }
 
-        c_dbk->cd(4); H("h_dbj2_mass")->Draw("HIST"); gPad->SetGrid();
-        c_dbk->cd(5); H("h_dbj2_pt")->Draw("HIST");   gPad->SetGrid();
-        c_dbk->cd(6); H("h_dbj2_eta")->Draw("HIST");  gPad->SetGrid();
+        // ================= FINAL LEPTONS =================
+        TCanvas *c_lep = new TCanvas("c_lep", "Final leptons", 1600, 900);
+        c_lep->Divide(3,2);
 
-        c_dbk->SaveAs("doubleb_mass_pt_eta.png");
+        c_lep->cd(1); if (auto h = H("h_lep1_pt_final"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(2); if (auto h = H("h_lep1_eta_final")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(3); if (auto h = H("h_lep1_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(4); if (auto h = H("h_lep2_pt_final"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(5); if (auto h = H("h_lep2_eta_final")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(6); if (auto h = H("h_lep2_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
 
-        // ================= HT =================
-        TCanvas *c_ht = new TCanvas("c_ht", "HT_scalar", 1200, 800);
-        H("h_HT")->Draw("HIST");
-        gPad->SetGrid();
+        c_lep->SaveAs("final_leptons.png");
 
-        c_ht->SaveAs("HT_scalar.png");
-
-        std::cout << "\nAll PNGs saved for MODE 2 (Higgs, MET, double-b mass+pT+eta, HT).\n";
         return;
     }
 
-    std::cout << "\nInvalid mode! Use reconplot(1) or reconplot(2).\n";
+    std::cout << "Invalid mode." << std::endl;
 }

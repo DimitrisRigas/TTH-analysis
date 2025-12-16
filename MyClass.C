@@ -70,31 +70,36 @@ void MyClass::Loop()
 
    std::cout << "Processing " << nentries << " entries from Tree." << std::endl;
 
-   // detect if current file is the signal (TTH12Gev.root)
+   // detect if current file is the signal (TTH12Gev.root) or ttbar (TTto2L2Nu)
    Bool_t isSignal = false;
+   Bool_t isTTbar  = false;
+
    TFile *currentFile = fChain->GetCurrentFile();
-   if (currentFile && std::string(currentFile->GetName()).find("TTH12Gev") != std::string::npos)
-      isSignal = true;
-   // ==============================
-   // Output file name by sample
-   // ==============================
+   std::string fname = currentFile ? std::string(currentFile->GetName()) : "";
+   //identify file names
+   if (fname.find("TTH12Gev") != std::string::npos)
+     {
+    isSignal = true;
+     }
+   else if (fname.find("TTto2L2Nu") != std::string::npos)
+     {
+       isTTbar = true;
+     }
 
+
+   // Output file name
    std::string outFileName = "output_unknown.root";
-
    if (isSignal)
-   outFileName = "output_signal.root";
-   else if (currentFile && std::string(currentFile->GetName()).find("TTto2L2Nu") != std::string::npos)
-  outFileName = "output_ttbar.root";
-   else if (currentFile && std::string(currentFile->GetName()).find("DY") != std::string::npos)
-     outFileName = "output_dy.root";
+      outFileName = "output_signal.root";
+   else if (isTTbar)
+      outFileName = "output_ttbar.root";
 
    // Create output ROOT file
    TFile *out = new TFile(outFileName.c_str(), "RECREATE");
 
    //
    //  wgt_prime: use for RAW histograms      (weight = 1)
-   //  wgt      : physics per-event weight    (Nexp / Nstat), computed AFTER
-   //             the event loop in section 3.
+   //  wgt      : physics per-event weight    (Nexp / Nstat)
    //
    //  Inside the RECO loop we use:
    //      const double weight = wgt_prime;
@@ -104,32 +109,37 @@ void MyClass::Loop()
    //
    // ------------------------------------------------------------------------
    float wgt_prime = 1.0f;
-   float wgt       = 1.0f;   // will be set to Nexp/Nstat in section 3
-   float sigma_pb  = 0.0f;
-
-   // Physics inputs
+   float wgt       = 1.0f;   // will be set to Nexp/Nstat
+   float sigma_pb  = 0.0f;   // cross section in pb
    const float L_int   = 108.96f;   // fb^-1
-   float sigma         = 1.0f;
+   const float Br_Wlnu = 0.1086f;   // BR(W->lnu) per lepton flavour (used only for signal)
 
-   const float Br_Wlnu = 0.1086f;   // BR(W->lnu) per lepton flavour
+   // Assign cross-section depending on sample
+   if (isSignal) {
+      sigma_pb = 0.5071f;   // ttH(aa) signal
+   } else if (isTTbar) {
+      sigma_pb = 98.04f;    // ttbar background
+   }
 
-   if (isSignal) { // if SIGNAL:
-     sigma_pb = 0.5071f;   // pb // SIGNAL x-sec
-     const float sigma_fb = sigma_pb * 1000.0f;      // pb -> fb
-     sigma = sigma_fb * Br_Wlnu * Br_Wlnu;           // σ × BR^2
+   // Convert pb → fb
+   const float sigma_fb = sigma_pb * 1000.0f;
+
+   // Expected events
+   float sigma = sigma_fb;
+   if (isSignal) {
+      // For signal apply BR(W->lnu)^2
+      sigma *= (Br_Wlnu * Br_Wlnu);
    }
-   /*
-   else if (std::string(currentFile->GetName()).find("tt_dileptonic.root") != std::string::npos) {
-     sigma = xx;
-   }
-   */
 
    float Nexp  = sigma * L_int;                     // expected events
    float Nstat = static_cast<float>(nentries);      // MC statistics
 
    // Correct per-event event weight:
    //   wgt = Nexp / Nstat
-   wgt = (Nstat > 0.0f) ? (Nexp / Nstat) : 1.0f;
+   if (Nstat > 0.0f)
+      wgt = Nexp / Nstat;
+   else
+      wgt = 1.0f;
 
    const long long Nexp_int = static_cast<long long>(std::llround(Nexp));
    const double w = static_cast<double>(wgt);       // alias to keep your printout using "w"
@@ -203,7 +213,7 @@ void MyClass::Loop()
    TH1F *h_W_had_eta = new TH1F("h_W_had_eta","Hadronic W #eta; #eta; Entries",        60,-5,5);
    TH1F *h_W_lep_pt  = new TH1F("h_W_lep_pt", "Leptonic W p_{T}; p_{T} [GeV]; Entries",      100,0,1000);
    TH1F *h_W_lep_eta = new TH1F("h_W_lep_eta","Leptonic W #eta; #eta; Entries",        60,-5,5);
-   
+
    TH1F *h_q_from_W_pt   = new TH1F("h_q_from_W_pt",  "Quarks from W p_{T}; p_{T}; Entries",  100,0,1000);
    TH1F *h_lep_from_W_pt = new TH1F("h_lep_from_W_pt","Leptons from W p_{T}; p_{T}; Entries",100,0,1000);
    TH1F *h_nu_from_W_pt  = new TH1F("h_nu_from_W_pt", "Neutrinos from W p_{T}; p_{T}; Entries",100,0,1000);
@@ -244,31 +254,32 @@ void MyClass::Loop()
    TH1F *h_dR_jet_mu_after   = new TH1F("h_dR_jet_mu_after",
                                         "#Delta R(jet, muon) AFTER cleaning; #Delta R; Entries",
                                         100, 0, 5);
+
    // --- Reconstructed Higgs kinematics ---
    TH1F *h_Hdbb_pt  = new TH1F("h_Hdbb_pt",
-			       "Reconstructed Higgs p_{T}; p_{T} [GeV]; Entries",
-			       100, 0, 1000);
+                               "Reconstructed Higgs p_{T}; p_{T} [GeV]; Entries",
+                               100, 0, 1000);
 
    TH1F *h_Hdbb_eta = new TH1F("h_Hdbb_eta",
-			       "Reconstructed Higgs #eta; #eta; Entries",
-			       60, -5, 5);
+                               "Reconstructed Higgs #eta; #eta; Entries",
+                               60, -5, 5);
 
    // --- Double-b jet kinematics (leading + subleading) ---
    TH1F *h_dbj1_pt  = new TH1F("h_dbj1_pt",
-			       "Double-b jet 1 p_{T}; p_{T} [GeV]; Entries",
-			       100, 0, 500);
+                               "Double-b jet 1 p_{T}; p_{T} [GeV]; Entries",
+                               100, 0, 500);
 
    TH1F *h_dbj1_eta = new TH1F("h_dbj1_eta",
-			       "Double-b jet 1 #eta; #eta; Entries",
-			       60, -2.5, 2.5);
+                               "Double-b jet 1 #eta; #eta; Entries",
+                               60, -2.5, 2.5);
 
    TH1F *h_dbj2_pt  = new TH1F("h_dbj2_pt",
-			       "Double-b jet 2 p_{T}; p_{T} [GeV]; Entries",
-			       100, 0, 500);
+                               "Double-b jet 2 p_{T}; p_{T} [GeV]; Entries",
+                               100, 0, 500);
 
    TH1F *h_dbj2_eta = new TH1F("h_dbj2_eta",
-			       "Double-b jet 2 #eta; #eta; Entries",
-			       60, -2.5, 2.5);
+                               "Double-b jet 2 #eta; #eta; Entries",
+                               60, -2.5, 2.5);
 
    // ranked objects: 4 jets, 2 electrons, 2 muons
    const int MAXJET   = 4;
@@ -350,33 +361,92 @@ void MyClass::Loop()
    TH1F *h_pre_MET_phi = new TH1F("h_pre_MET_phi","Puppi MET #phi (pre-selection); #phi; Entries",        64,-3.2, 3.2);
 
    // --- NEW HISTOGRAMS FOR REAL ANALYSIS ---
-
    TH1F *h_Hdbb_mass = new TH1F("h_Hdbb_mass",
-				"Reconstructed Higgs mass from double-b jets; m_{bb} [GeV]; Entries",
-				80, 0, 500);
+                                "Reconstructed Higgs mass from double-b jets; m_{bb} [GeV]; Entries",
+                                80, 0, 500);
    TH1F *h_MET_pt_final = new TH1F("h_MET_pt_final",
-				   "MET (final selection); MET [GeV]; Entries",
-				   100, 0, 500);
+                                   "MET (final selection); MET [GeV]; Entries",
+                                   100, 0, 500);
    TH1F *h_MET_phi_final = new TH1F("h_MET_phi_final",
-				    "MET #phi (final selection); #phi; Entries",
-				    64, -3.2, 3.2);
+                                    "MET #phi (final selection); #phi; Entries",
+                                    64, -3.2, 3.2);
    TH1F *h_dbj1_mass = new TH1F("h_dbj1_mass",
-				"Double-b jet 1 mass; m [GeV]; Entries",
-				80, 0, 80);
+                                "Double-b jet 1 mass; m [GeV]; Entries",
+                                80, 0, 80);
    TH1F *h_dbj2_mass = new TH1F("h_dbj2_mass",
-				"Double-b jet 2 mass; m [GeV]; Entries",
-				80, 0, 80);
+                                "Double-b jet 2 mass; m [GeV]; Entries",
+                                80, 0, 80);
    TH1F *h_HT = new TH1F("h_HT",
-			 "H_{T} scalar sum of jet p_{T}; H_{T} [GeV]; Entries",
-			 100, 0, 2000);
+                         "H_{T} scalar sum of jet p_{T}; H_{T} [GeV]; Entries",
+                         100, 0, 2000);
 
+   // ==========================================================
+   // NEW REAL-ANALYSIS HISTOGRAMS (after full selection)
+   // ==========================================================
+   //
+   // IMPORTANT FIX: these ROOT names must be UNIQUE (not "h_dbj1_phi" etc),
+   // because you already have ranked histograms named "h_dbj1_phi" from h_dbj_phi[].
+   //
+   TH1F *h_dR_dbj12 = new TH1F(
+       "h_dR_dbj12_final",
+       "#Delta R(double-b jet 1, double-b jet 2) (final); #Delta R; Entries",
+       100, 0, 5
+   );
+
+   TH1F *h_dbj1_phi = new TH1F(
+       "h_dbj1_phi_final",
+       "Double-b jet 1 #phi (final); #phi; Entries",
+       64, -3.2, 3.2
+   );
+
+   TH1F *h_dbj2_phi = new TH1F(
+       "h_dbj2_phi_final",
+       "Double-b jet 2 #phi (final); #phi; Entries",
+       64, -3.2, 3.2
+   );
+
+   TH1F *h_lep1_pt = new TH1F(
+       "h_lep1_pt_final",
+       "Leading lepton p_{T} (final); p_{T} [GeV]; Entries",
+       100, 0, 500
+   );
+
+   TH1F *h_lep1_eta = new TH1F(
+       "h_lep1_eta_final",
+       "Leading lepton #eta (final); #eta; Entries",
+       60, -2.5, 2.5
+   );
+
+   TH1F *h_lep1_phi = new TH1F(
+       "h_lep1_phi_final",
+       "Leading lepton #phi (final); #phi; Entries",
+       64, -3.2, 3.2
+   );
+
+   TH1F *h_lep2_pt = new TH1F(
+       "h_lep2_pt_final",
+       "Subleading lepton p_{T} (final); p_{T} [GeV]; Entries",
+       100, 0, 500
+   );
+
+   TH1F *h_lep2_eta = new TH1F(
+       "h_lep2_eta_final",
+       "Subleading lepton #eta (final); #eta; Entries",
+       60, -2.5, 2.5
+   );
+
+   TH1F *h_lep2_phi = new TH1F(
+       "h_lep2_phi_final",
+       "Subleading lepton #phi (final); #phi; Entries",
+       64, -3.2, 3.2
+   );
 
    // ------------------------------------------------------------------------
    // Cut-flow counters (for RECO only)
    // ------------------------------------------------------------------------
 
    Long64_t nCut1 = 0; // N leptons >= 2
-   Long64_t nCut2 = 0; // OS lepton pair (e/e, μ/μ, e/μ, μ/e)
+   Long64_t nCut2 = 0; // OS lepton pair
    Long64_t nCut3 = 0; // N jets >= 4 (using CLEAN jets)
    Long64_t nCut4 = 0; // N b-jets >= 2
    Long64_t nCut5 = 0; // N double-b-jets >= 2
@@ -398,7 +468,6 @@ void MyClass::Loop()
    // ========================================================================
    // 2. EVENT LOOP
    // ========================================================================
-
    for (Long64_t jentry = 0; jentry < nentries; ++jentry) {
       Long64_t ientry = LoadTree(jentry);
       if (ientry < 0) break;
@@ -412,12 +481,9 @@ void MyClass::Loop()
          // 2B. GEN-LEVEL ANALYSIS
          // ------------------------------------------------------------------
 
-         // --- Find "final" tops and Higgs bosons ---
-
          std::vector<int> final_tops;
          std::vector<int> final_higgs;
 
-         // Simple top selection: first +6 → t1, first -6 → t2
          int t1 = -1;
          int t2 = -1;
 
@@ -430,7 +496,6 @@ void MyClass::Loop()
          if (t1 != -1) final_tops.push_back(t1);
          if (t2 != -1) final_tops.push_back(t2);
 
-         // Higgs: keep last copy (no daughter Higgs)
          for (int i = 0; i < nGenPart; ++i) {
             const int pdg = std::abs(GenPart_pdgId[i]);
             if (pdg != 25) continue;
@@ -445,8 +510,6 @@ void MyClass::Loop()
             }
             if (!hasHiggsDaughter) final_higgs.push_back(i);
          }
-
-         // --- HIGGS → a a → 4b ---
 
          for (int ih : final_higgs) {
 
@@ -463,7 +526,6 @@ void MyClass::Loop()
                 }
              }
 
-             // a1
              if (!a_indices.empty()) {
                  int ia1 = a_indices[0];
 
@@ -487,7 +549,6 @@ void MyClass::Loop()
                  }
              }
 
-             // a2
              if (a_indices.size() > 1) {
                  int ia2 = a_indices[1];
 
@@ -515,7 +576,6 @@ void MyClass::Loop()
                  }
              }
 
-             // all b's from all a's (for ranking)
              std::vector<int> all_b_from_a;
              for (int ia : a_indices) {
                  for (int k = 0; k < nGenPart; ++k) {
@@ -548,13 +608,10 @@ void MyClass::Loop()
                  h_b4_from_a_eta->Fill(GenPart_eta[all_b_from_a[3]]);
                  h_b4_from_a_phi->Fill(GenPart_phi[all_b_from_a[3]]);
              }
-         } // end loop over final_higgs
-
-         // --- TOPS & W bosons ---
+         }
 
          auto processTop = [&](int idx, int rank) {
 
-             // Top kinematics from chosen copy (t1/t2)
              if (rank == 1) {
                  h_t1_pt  ->Fill(GenPart_pt[idx]);
                  h_t1_eta ->Fill(GenPart_eta[idx]);
@@ -567,7 +624,6 @@ void MyClass::Loop()
                  h_t2_mass->Fill(GenPart_mass[idx]);
              }
 
-             // Follow top copies down to the decaying one
              int  final_top = idx;
              bool search    = true;
              while (search) {
@@ -582,7 +638,6 @@ void MyClass::Loop()
                  }
              }
 
-             // Identify W and b daughters of the final top
              int b_idx = -1;
              int w_idx = -1;
 
@@ -592,7 +647,6 @@ void MyClass::Loop()
                  if (std::abs(GenPart_pdgId[j]) == 24) w_idx = j;
              }
 
-             // b from top
              if (b_idx != -1) {
                  if (rank == 1) {
                      h_b1_top_pt ->Fill(GenPart_pt[b_idx]);
@@ -605,13 +659,11 @@ void MyClass::Loop()
                  }
              }
 
-             // Process W decay
              if (w_idx != -1) {
 
                  int  final_w = w_idx;
                  bool isFinal = false;
 
-                 // Walk down W→W chain to last copy
                  while (!isFinal) {
                      bool hasDaughter = false;
                      for (int k = 0; k < nGenPart; ++k) {
@@ -641,9 +693,9 @@ void MyClass::Loop()
                      if (absId >= 11 && absId <= 16) {
                          isLep = true;
                          if (absId % 2 == 1)
-                             h_lep_from_W_pt->Fill(GenPart_pt[k]);  // e, μ, τ
+                             h_lep_from_W_pt->Fill(GenPart_pt[k]);
                          else
-                             h_nu_from_W_pt ->Fill(GenPart_pt[k]);  // ν_e, ν_μ, ν_τ
+                             h_nu_from_W_pt ->Fill(GenPart_pt[k]);
                      }
                  }
 
@@ -656,54 +708,42 @@ void MyClass::Loop()
                      h_W_lep_eta->Fill(GenPart_eta[final_w]);
                  }
 
-                 // ΔR(W,b)
                  if (b_idx != -1) {
                      h_dR_Wb->Fill(
                          DeltaR(GenPart_eta[final_w], GenPart_phi[final_w],
                                 GenPart_eta[b_idx],    GenPart_phi[b_idx])
                      );
                  }
-             } // end if w_idx != -1
-         }; // end processTop lambda
+             }
+         };
 
          if (final_tops.size() > 0) processTop(final_tops[0], 1);
          if (final_tops.size() > 1) processTop(final_tops[1], 2);
 
       } // end if (isSignal)
 
-
       // ---------------------------------------------------------------------
-      // 2A. RECO-LEVEL ANALYSIS (object selection, pre-selection histos, cuts)
+      // 2A. RECO-LEVEL ANALYSIS
       // ---------------------------------------------------------------------
 
-      // Single per-event weight used for ALL RECO Fill(...) calls in this event.
-      // RAW (current):
       const double weight = static_cast<double>(wgt_prime);
-      // WEIGHTED (later, if you want):
-      // const double weight = wgt;
 
-      // --- MET (pre-selection, before any cuts) ---
       h_pre_MET_pt ->Fill(PuppiMET_pt,  weight);
       h_pre_MET_phi->Fill(PuppiMET_phi, weight);
 
-      // RECO collections
       std::vector<TLorentzVector> vec_ele;
       std::vector<TLorentzVector> vec_muons;
       std::vector<TLorentzVector> vec_jet;
-      std::vector<TLorentzVector> vec_cjet;        // NEW: clean jets
+      std::vector<TLorentzVector> vec_cjet;
       std::vector<TLorentzVector> vec_bjets;
       std::vector<TLorentzVector> vec_doublebjets;
-      std::vector<RecoLepton>     leptons;  // for cutflow on leptons
+      std::vector<RecoLepton>     leptons;
 
-      // -----------------------
-      // Electron selection
-      //  pT > 20 GeV, |eta| < 2.5
-      // -----------------------
       for (int i = 0; i < nElectron; ++i) {
          TLorentzVector p4;
          p4.SetPtEtaPhiM(Electron_pt[i], Electron_eta[i], Electron_phi[i], Electron_mass[i]);
 
-         if (p4.Pt() <= 20.0)       continue;
+         if (p4.Pt() <= 20.0) continue;
          if (std::fabs(p4.Eta()) >= 2.5) continue;
 
          vec_ele.push_back(p4);
@@ -711,19 +751,15 @@ void MyClass::Loop()
          RecoLepton lep;
          lep.p4      = p4;
          lep.charge  = Electron_charge[i];
-         lep.flavour = 0; // electron
+         lep.flavour = 0;
          leptons.push_back(lep);
       }
 
-      // -----------------------
-      // Muon selection
-      //  pT > 20 GeV, |eta| < 2.5
-      // -----------------------
       for (int i = 0; i < nMuon; ++i) {
          TLorentzVector p4;
          p4.SetPtEtaPhiM(Muon_pt[i], Muon_eta[i], Muon_phi[i], Muon_mass[i]);
 
-         if (p4.Pt() <= 20.0)       continue;
+         if (p4.Pt() <= 20.0) continue;
          if (std::fabs(p4.Eta()) >= 2.5) continue;
 
          vec_muons.push_back(p4);
@@ -731,16 +767,10 @@ void MyClass::Loop()
          RecoLepton lep;
          lep.p4      = p4;
          lep.charge  = Muon_charge[i];
-         lep.flavour = 1; // muon
+         lep.flavour = 1;
          leptons.push_back(lep);
       }
 
-      // -----------------------
-      // Jet selection
-      //  pT > 20 GeV, |eta| < 2.5
-      //  b-jet: Jet_btagUParTAK4B > 0.4648
-      //  double-b: Jet_btagUParTAK4probbb > 0.38
-      // -----------------------
       for (int i = 0; i < nJet; ++i) {
          float pt  = Jet_pt[i];
          float eta = Jet_eta[i];
@@ -753,19 +783,17 @@ void MyClass::Loop()
          j.SetPtEtaPhiM(pt, eta, phi, Jet_mass[i]);
          vec_jet.push_back(j);
 
-         if (Jet_btagUParTAK4B[i] > 0.4648f) {
-           vec_bjets.push_back(j);
-         }
+         bool isDoubleB = (Jet_btagUParTAK4probbb[i] > 0.12f);
 
-         if (Jet_btagUParTAK4probbb[i] > 0.38f) {
+         if (isDoubleB) {
            vec_doublebjets.push_back(j);
+         }
+         else if (Jet_btagUParTAK4B[i] > 0.4648f) {
+           vec_bjets.push_back(j);
          }
       }
 
-      // Sort all RECO collections by descending pT
-      auto cmpPt = [](const TLorentzVector &a, const TLorentzVector &b) {
-         return a.Pt() > b.Pt();
-      };
+      auto cmpPt = [](const TLorentzVector &a, const TLorentzVector &b) { return a.Pt() > b.Pt(); };
 
       std::sort(vec_ele.begin(),        vec_ele.end(),        cmpPt);
       std::sort(vec_muons.begin(),      vec_muons.end(),      cmpPt);
@@ -774,58 +802,46 @@ void MyClass::Loop()
       std::sort(vec_doublebjets.begin(),vec_doublebjets.end(),cmpPt);
 
       std::sort(leptons.begin(), leptons.end(),
-                [](const RecoLepton &a, const RecoLepton &b) {
-                  return a.p4.Pt() > b.p4.Pt();
-                });
+                [](const RecoLepton &a, const RecoLepton &b) { return a.p4.Pt() > b.p4.Pt(); });
 
-      // -----------------------
-      // 2A.0 PRE-SELECTION HISTOGRAMS (only pT/eta cuts)
-      // -----------------------
+      // PRE-SELECTION HISTOGRAMS
+      h_nEle->Fill(vec_ele.size(),   weight);
+      h_nMu ->Fill(vec_muons.size(), weight);
+      h_nJet->Fill(vec_jet.size(),   weight);
 
-      // multiplicities (before cleaning)
-      h_nEle->Fill(vec_ele.size(),        weight);
-      h_nMu ->Fill(vec_muons.size(),      weight);
-      h_nJet->Fill(vec_jet.size(),        weight);
-
-      h_nBjet->Fill(vec_bjets.size(),     weight);
+      h_nBjet->Fill(vec_bjets.size(), weight);
       h_nDoubleB->Fill(vec_doublebjets.size(), weight);
 
-      // all selected electrons
       for (const auto &el : vec_ele) {
          h_ele_pt ->Fill(el.Pt(),  weight);
          h_ele_eta->Fill(el.Eta(), weight);
          h_ele_phi->Fill(el.Phi(), weight);
       }
 
-      // all selected muons
       for (const auto &mu : vec_muons) {
          h_mu_pt ->Fill(mu.Pt(),  weight);
          h_mu_eta->Fill(mu.Eta(), weight);
          h_mu_phi->Fill(mu.Phi(), weight);
       }
 
-      // all selected jets
       for (const auto &jet : vec_jet) {
          h_jet_pt ->Fill(jet.Pt(),  weight);
          h_jet_eta->Fill(jet.Eta(), weight);
          h_jet_phi->Fill(jet.Phi(), weight);
       }
 
-      // all selected b-jets
       for (const auto &bj : vec_bjets) {
          h_bjet_pt ->Fill(bj.Pt(),  weight);
          h_bjet_eta->Fill(bj.Eta(), weight);
          h_bjet_phi->Fill(bj.Phi(), weight);
       }
 
-      // all selected double-b-tagged jets
       for (const auto &dbj : vec_doublebjets) {
          h_dbjet_pt ->Fill(dbj.Pt(),  weight);
          h_dbjet_eta->Fill(dbj.Eta(), weight);
          h_dbjet_phi->Fill(dbj.Phi(), weight);
       }
 
-      // ranked electrons (up to MAXELE)
       {
          const int maxEle = std::min<int>(vec_ele.size(), MAXELE);
          for (int i = 0; i < maxEle; ++i) {
@@ -835,7 +851,6 @@ void MyClass::Loop()
          }
       }
 
-      // ranked muons (up to MAXMU)
       {
          const int maxMu = std::min<int>(vec_muons.size(), MAXMU);
          for (int i = 0; i < maxMu; ++i) {
@@ -845,7 +860,6 @@ void MyClass::Loop()
          }
       }
 
-      // ranked jets (up to MAXJET)
       {
          const int maxJet = std::min<int>(vec_jet.size(), MAXJET);
          for (int i = 0; i < maxJet; ++i) {
@@ -855,7 +869,6 @@ void MyClass::Loop()
          }
       }
 
-      // ranked b-jets (up to MAXBJET)
       {
          const int maxB = std::min<int>(vec_bjets.size(), MAXBJET);
          for (int i = 0; i < maxB; ++i) {
@@ -865,7 +878,6 @@ void MyClass::Loop()
          }
       }
 
-      // ranked double-b-tagged jets (up to MAXDBJET)
       {
          const int maxDB = std::min<int>(vec_doublebjets.size(), MAXDBJET);
          for (int i = 0; i < maxDB; ++i) {
@@ -875,163 +887,106 @@ void MyClass::Loop()
          }
       }
 
-      // -----------------------
-      // 2A.1 EVENT SELECTION (CUT-FLOW)
-      // -----------------------
-
+      // CUT FLOW
       const int Nleptons = leptons.size();
       const int Nbjets   = vec_bjets.size();
       const int Ndoubleb = vec_doublebjets.size();
 
-      // Cut 1: at least 2 leptons (e or μ)
       if (Nleptons < 2) continue;
       ++nCut1;
 
-      // --------------------------------------------------------
-      // NEW: Jet–lepton ΔR BEFORE cleaning (after Cut 1)
-      // --------------------------------------------------------
       for (const auto &jet : vec_jet) {
-         for (const auto &el : vec_ele) {
-            h_dR_jet_ele_before->Fill(jet.DeltaR(el), weight);
-         }
-         for (const auto &mu : vec_muons) {
-            h_dR_jet_mu_before->Fill(jet.DeltaR(mu), weight);
-         }
+         for (const auto &el : vec_ele)  h_dR_jet_ele_before->Fill(jet.DeltaR(el), weight);
+         for (const auto &mu : vec_muons) h_dR_jet_mu_before ->Fill(jet.DeltaR(mu), weight);
       }
 
-      // --------------------------------------------------------
-      // NEW: JET CLEANING (AFTER Cut 1)
-      // Keep jets with ΔR(jet, lepton) >= 0.4
-      // --------------------------------------------------------
       const double dRclean = 0.4;
-
       for (const auto &jet : vec_jet) {
-
          bool keep = true;
 
-         // check against electrons
          for (const auto &el : vec_ele) {
-            if (jet.DeltaR(el) < dRclean) {
-               keep = false;
-               break;
-            }
+            if (jet.DeltaR(el) < dRclean) { keep = false; break; }
          }
-
-         // if still kept, check against muons
          if (keep) {
             for (const auto &mu : vec_muons) {
-               if (jet.DeltaR(mu) < dRclean) {
-                  keep = false;
-                  break;
-               }
+               if (jet.DeltaR(mu) < dRclean) { keep = false; break; }
             }
          }
-
-         if (keep) {
-            vec_cjet.push_back(jet);
-         }
+         if (keep) vec_cjet.push_back(jet);
       }
 
-      // Clean jet multiplicity histogram (after cleaning)
       h_nCJet->Fill(vec_cjet.size(), weight);
 
-      // ΔR AFTER cleaning (only for jets that survived cleaning)
       for (const auto &jet : vec_cjet) {
-         for (const auto &el : vec_ele) {
-            h_dR_jet_ele_after->Fill(jet.DeltaR(el), weight);
-         }
-         for (const auto &mu : vec_muons) {
-            h_dR_jet_mu_after->Fill(jet.DeltaR(mu), weight);
-         }
+         for (const auto &el : vec_ele)   h_dR_jet_ele_after->Fill(jet.DeltaR(el), weight);
+         for (const auto &mu : vec_muons) h_dR_jet_mu_after ->Fill(jet.DeltaR(mu), weight);
       }
 
-      // Now define Njets based on CLEAN jets
       const int Njets = vec_cjet.size();
 
-      // Cut 2: OS lepton pair among the two leading leptons
       bool os_flavour_ok = false;
-
       RecoLepton &l1 = leptons[0];
       RecoLepton &l2 = leptons[1];
 
-      // opposite charge, any flavour combination e/e, μ/μ, e/μ, μ/e
-      if (l1.charge * l2.charge < 0) {
-         os_flavour_ok = true;
-      }
+      if (l1.charge * l2.charge < 0) os_flavour_ok = true;
 
       if (!os_flavour_ok) continue;
       ++nCut2;
 
-      // Cut 3: at least 4 jets
       if (Njets < 4) continue;
       ++nCut3;
 
-      // Cut 4: at least 2 b-tagged jets
       if (Nbjets < 2) continue;
       ++nCut4;
 
-      // Cut 5: at least 2 double-b-tagged jets
       if (Ndoubleb < 2) continue;
       ++nCut5;
 
-      // Cut 6: MET >= 40 GeV
       if (PuppiMET_pt < 40.0) continue;
       ++nCut6;
 
-      // START REAL ANALYSIS: Calculate the event-level kinematic variables
-      // (you can add more here as needed)
       // =====================================================================
-      // This block executes ONLY after the full event selection.
-      //
-      // Higgs → aa → bbbb is reconstructed FROM DOUBLE-B TAGGED JETS ONLY.
-      // HT uses ALL jets (as in your original code).
-      // MET is the PUPPI MET after all cuts.
+      // REAL ANALYSIS (FINAL SELECTION): FILL ONLY (NO DECLARATIONS)
       // =====================================================================
 
-      // -------------------------------------------
-      // 1) Reconstruct Higgs candidate from double-b jets
-      // -------------------------------------------
       const TLorentzVector &db1 = vec_doublebjets[0];
       const TLorentzVector &db2 = vec_doublebjets[1];
 
       TLorentzVector HiggsCand = db1 + db2;
 
       h_Hdbb_mass->Fill(HiggsCand.M(), weight);
-      // Higgs kinematics
-      h_Hdbb_pt ->Fill(HiggsCand.Pt(),  weight);
-      h_Hdbb_eta->Fill(HiggsCand.Eta(), weight);
+      h_Hdbb_pt  ->Fill(HiggsCand.Pt(),  weight);
+      h_Hdbb_eta ->Fill(HiggsCand.Eta(), weight);
 
-      // -------------------------------------------
-      // 2) MET
-      // -------------------------------------------
       h_MET_pt_final ->Fill(PuppiMET_pt,  weight);
       h_MET_phi_final->Fill(PuppiMET_phi, weight);
 
-      // -------------------------------------------
-      // 3) Double-b jet masses
-      // -------------------------------------------
       h_dbj1_mass->Fill(db1.M(), weight);
       h_dbj2_mass->Fill(db2.M(), weight);
-      // Double-b jet kinematics
+
       h_dbj1_pt ->Fill(db1.Pt(),  weight);
       h_dbj1_eta->Fill(db1.Eta(), weight);
 
       h_dbj2_pt ->Fill(db2.Pt(),  weight);
       h_dbj2_eta->Fill(db2.Eta(), weight);
 
-      // -------------------------------------------
-      // 4) HT = sum of all jet pT (unchanged: uses vec_jet)
-      // -------------------------------------------
       double HT = 0.0;
-      for (const auto &j : vec_jet)
-	HT += j.Pt();
-
+      for (const auto &j : vec_jet) HT += j.Pt();
       h_HT->Fill(HT, weight);
 
-      // =====================================================================
-      // END REAL ANALYSIS
-      // =====================================================================
+      // --- NEW FINAL histograms (fixed) ---
+      h_dR_dbj12->Fill(db1.DeltaR(db2), weight);
 
+      h_dbj1_phi->Fill(db1.Phi(), weight);
+      h_dbj2_phi->Fill(db2.Phi(), weight);
+
+      h_lep1_pt ->Fill(l1.p4.Pt(),  weight);
+      h_lep1_eta->Fill(l1.p4.Eta(), weight);
+      h_lep1_phi->Fill(l1.p4.Phi(), weight);
+
+      h_lep2_pt ->Fill(l2.p4.Pt(),  weight);
+      h_lep2_eta->Fill(l2.p4.Eta(), weight);
+      h_lep2_phi->Fill(l2.p4.Phi(), weight);
 
    } // end event loop
 
@@ -1057,9 +1012,6 @@ void MyClass::Loop()
    std::cout << " per-event weight w   = Nexp/Nstat = " << fmt3(w) << "\n";
    std::cout << "=============================================================\n\n";
 
-   // --------------------------------------------------------------------
-   // 4. CUT-FLOW TABLE (absolute, weighted, efficiencies)
-   // --------------------------------------------------------------------
    auto eff_decimal = [&](Long64_t n) {
      if (nentries == 0) return std::string("0.000");
      const double e = static_cast<double>(n) / static_cast<double>(nentries);
@@ -1077,43 +1029,36 @@ void MyClass::Loop()
              << std::setw(15) << "Eff" << std::endl;
    std::cout << "-------------------------------------------------------------\n";
 
-   // Step 0: Raw
    std::cout << std::left << std::setw(35) << "Step 0) Raw events"
              << std::setw(15) << nentries
              << std::setw(15) << fmt3(static_cast<double>(nentries) * w)
              << std::setw(15) << "1.000" << std::endl;
 
-   // Step 1
    std::cout << std::left << std::setw(35) << "Step 1) N leptons >= 2"
              << std::setw(15) << nCut1
              << std::setw(15) << fmt3(static_cast<double>(nCut1) * w)
              << std::setw(15) << eff_decimal(nCut1) << std::endl;
 
-   // Step 2
    std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair (e/μ)"
              << std::setw(15) << nCut2
              << std::setw(15) << fmt3(static_cast<double>(nCut2) * w)
              << std::setw(15) << eff_decimal(nCut2) << std::endl;
 
-   // Step 3
    std::cout << std::left << std::setw(35) << "Step 3) Clean N  jets >= 4"
              << std::setw(15) << nCut3
              << std::setw(15) << fmt3(static_cast<double>(nCut3) * w)
              << std::setw(15) << eff_decimal(nCut3) << std::endl;
 
-   // Step 4
    std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 2"
              << std::setw(15) << nCut4
              << std::setw(15) << fmt3(static_cast<double>(nCut4) * w)
              << std::setw(15) << eff_decimal(nCut4) << std::endl;
 
-   // Step 5
    std::cout << std::left << std::setw(35) << "Step 5) N double-b-jets >= 2"
              << std::setw(15) << nCut5
              << std::setw(15) << fmt3(static_cast<double>(nCut5) * w)
              << std::setw(15) << eff_decimal(nCut5) << std::endl;
 
-   // Step 6
    std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
              << std::setw(15) << nCut6
              << std::setw(15) << fmt3(static_cast<double>(nCut6) * w)
@@ -1121,9 +1066,6 @@ void MyClass::Loop()
 
    std::cout << "=============================================================\n";
 
-   // ========================================================================
-   // 5. WRITE EVERYTHING TO FILE
-   // ========================================================================
    out->Write();
    out->Close();
 
