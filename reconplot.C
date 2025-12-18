@@ -38,13 +38,11 @@ void reconplot(int mode = 1, int sample = 0) {
         return h;
     };
 
-    std::string tag = "_raw";
-
     // =====================================================================
     // MODE 1 → OBJECT-LEVEL RECO
     // =====================================================================
     if (mode == 1) {
-        // (UNCHANGED — omitted for brevity)
+        // unchanged (not shown)
         return;
     }
 
@@ -63,7 +61,7 @@ void reconplot(int mode = 1, int sample = 0) {
 
         c_h->SaveAs("Higgs_reco.png");
 
-        // ================= DOUBLE-B JETS (4x2) =================
+        // ================= DOUBLE-B JETS =================
         TCanvas *c_dbk = new TCanvas("c_dbk", "DoubleB jets", 2000, 1000);
         c_dbk->Divide(4, 2);
 
@@ -87,15 +85,15 @@ void reconplot(int mode = 1, int sample = 0) {
             c_dRdb->SaveAs("DeltaR_dbj1_dbj2.png");
         }
 
-        // ================= Δm = |m(db1) − m(db2)| =================
+        // ================= Δm(db1, db2) =================
         if (auto h = H("h_dM_bj12_final")) {
             TCanvas *c_dm = new TCanvas("c_dm", "DeltaM double-b jets", 1000, 800);
             h->Draw("HIST");
             gPad->SetGrid();
-	    c_dm->SaveAs("DeltaM_dbj1_dbj2.png");
+            c_dm->SaveAs("DeltaM_dbj1_dbj2.png");
         }
 
-        // ================= FINAL B-JETS (2x2) =================
+        // ================= FINAL B-JETS =================
         TCanvas *c_bj = new TCanvas("c_bj", "Final b-jets", 1200, 800);
         c_bj->Divide(2,2);
 
@@ -106,16 +104,21 @@ void reconplot(int mode = 1, int sample = 0) {
 
         c_bj->SaveAs("final_bjets.png");
 
-        // ================= FINAL LEPTONS =================
-        TCanvas *c_lep = new TCanvas("c_lep", "Final leptons", 1600, 900);
-        c_lep->Divide(3,2);
+        // ================= FINAL LEPTONS (SYMMETRIC) =================
+        TCanvas *c_lep = new TCanvas("c_lep", "Final leptons", 2000, 1000);
+        c_lep->Divide(4,2);
 
+        // leading lepton (top row)
         c_lep->cd(1); if (auto h = H("h_lep1_pt_final"))  { h->Draw("HIST"); gPad->SetGrid(); }
         c_lep->cd(2); if (auto h = H("h_lep1_eta_final")) { h->Draw("HIST"); gPad->SetGrid(); }
         c_lep->cd(3); if (auto h = H("h_lep1_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
-        c_lep->cd(4); if (auto h = H("h_lep2_pt_final"))  { h->Draw("HIST"); gPad->SetGrid(); }
-        c_lep->cd(5); if (auto h = H("h_lep2_eta_final")) { h->Draw("HIST"); gPad->SetGrid(); }
-        c_lep->cd(6); if (auto h = H("h_lep2_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(4); if (auto h = H("h_dRll"))           { h->Draw("HIST"); gPad->SetGrid(); }
+
+        // subleading lepton (bottom row)
+        c_lep->cd(5); if (auto h = H("h_lep2_pt_final"))  { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(6); if (auto h = H("h_lep2_eta_final")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(7); if (auto h = H("h_lep2_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
+        c_lep->cd(8); if (auto h = H("h_mll"))            { h->Draw("HIST"); gPad->SetGrid(); }
 
         c_lep->SaveAs("final_leptons.png");
 

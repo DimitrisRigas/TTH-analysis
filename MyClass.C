@@ -475,6 +475,17 @@ void MyClass::Loop()
        "Subleading lepton #phi (final); #phi; Entries",
        64, -3.2, 3.2
    );
+   TH1F *h_mll = new TH1F(
+			  "h_mll",
+			  "Dilepton invariant mass; m_{ll} [GeV]; Entries",
+			  100, 0, 200
+			  );
+
+   TH1F *h_dRll = new TH1F(
+			   "h_dRll",
+			   "#Delta R(l_{1}, l_{2}); #Delta R; Entries",
+			   100, 0, 5
+			   );
 
    // ------------------------------------------------------------------------
    // Cut-flow counters (for RECO only)
@@ -486,6 +497,9 @@ void MyClass::Loop()
    Long64_t nCut4 = 0; // N b-jets >= 2
    Long64_t nCut5 = 0; // N double-b-jets >= 2
    Long64_t nCut6 = 0; // MET >= 40
+   Long64_t nCut7 = 0; // |mH - 125| < 50
+   Long64_t nCut8 = 0; // |mll - 70| > 20
+ 
 
    // Helper for sorting GEN particles by pT
    auto sortParticles = [&](std::vector<int> &indices) {
@@ -979,6 +993,26 @@ void MyClass::Loop()
 
       if (PuppiMET_pt < 40.0) continue;
       ++nCut6;
+      // ==========================================================
+      // ==========================================================
+      // Step 7: |mH - 125| < 50
+      // ==========================================================
+
+      const double mH_tmp =
+	(vec_doublebjets[0] + vec_doublebjets[1]).M();
+
+      if (std::fabs(mH_tmp - 125.0) >= 50.0) continue;
+      ++nCut7;
+
+      // ==========================================================
+      // Step 8: |mll - 70| > 20
+      // ==========================================================
+
+      TLorentzVector ll = l1.p4 + l2.p4;
+
+      if (std::fabs(ll.M() - 90.0) <= 20.0) continue;
+      ++nCut8;
+
 
       // =====================================================================
       // REAL ANALYSIS (FINAL SELECTION): FILL ONLY (NO DECLARATIONS)
@@ -1035,7 +1069,13 @@ void MyClass::Loop()
 
       h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
       h_bj2_eta_final->Fill(bj2.Eta(), weight);
- 
+      // ==========================================================
+      // Dilepton observables 
+      // ==========================================================
+
+      h_mll ->Fill(ll.M(), weight);
+      h_dRll->Fill(l1.p4.DeltaR(l2.p4), weight);
+
    } // end event loop
 
    // ========================================================================
@@ -1111,6 +1151,16 @@ void MyClass::Loop()
              << std::setw(15) << nCut6
              << std::setw(15) << fmt3(static_cast<double>(nCut6) * w)
              << std::setw(15) << eff_decimal(nCut6) << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 7) |mH - 125| < 50"
+	     << std::setw(15) << nCut7
+	     << std::setw(15) << fmt3(static_cast<double>(nCut7) * w)
+	     << std::setw(15) << eff_decimal(nCut7) << std::endl;
+
+   std::cout << std::left << std::setw(35) << "Step 8) |mll - 70| > 20"
+	     << std::setw(15) << nCut8
+	     << std::setw(15) << fmt3(static_cast<double>(nCut8) * w)
+	     << std::setw(15) << eff_decimal(nCut8) << std::endl;
+
 
    std::cout << "=============================================================\n";
 
