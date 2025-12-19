@@ -19,8 +19,6 @@
 #include <utility>
 using namespace std;
 
-
-
 // ============================================================================
 // Helper Functions (geometry & kinematics)
 // ============================================================================
@@ -80,11 +78,12 @@ double pdgStatError(Long64_t N)
 
   return 0.5 * (up - low);
 }
+
 //format raw
 std::string formatRaw(Long64_t N)
 {
     const double err = pdgStatError(N);
-    
+
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%lld ± %.2f", N, err);
     return std::string(buf);
@@ -116,29 +115,44 @@ void MyClass::Loop()
 
    std::cout << "Processing " << nentries << " entries from Tree." << std::endl;
 
-   // detect if current file is the signal (TTH12Gev.root) or ttbar (TTto2L2Nu)
+   // ------------------------------------------------------------------------
+   // detect which sample this file is
+   // ------------------------------------------------------------------------
    Bool_t isSignal = false;
    Bool_t isTTbar  = false;
 
+   // NEW BACKGROUNDS
+   Bool_t isDYee   = false;
+   Bool_t isDYmumu = false;
+
    TFile *currentFile = fChain->GetCurrentFile();
    std::string fname = currentFile ? std::string(currentFile->GetName()) : "";
-   //identify file names
-   if (fname.find("TTH12Gev") != std::string::npos)
-     {
-    isSignal = true;
-     }
-   else if (fname.find("TTto2L2Nu") != std::string::npos)
-     {
-       isTTbar = true;
-     }
 
+   if (fname.find("TTH12Gev") != std::string::npos) {
+      isSignal = true;
+   }
+   else if (fname.find("TTto2L2Nu") != std::string::npos) {
+      isTTbar = true;
+   }
+   else if (fname.find("DYto2E4JETS") != std::string::npos) {
+      isDYee = true;
+   }
+   else if (fname.find("DYto2MU4JETS") != std::string::npos) {
+      isDYmumu = true;
+   }
 
+   // ------------------------------------------------------------------------
    // Output file name
+   // ------------------------------------------------------------------------
    std::string outFileName = "output_unknown.root";
    if (isSignal)
       outFileName = "output_signal.root";
    else if (isTTbar)
       outFileName = "output_ttbar.root";
+   else if (isDYee)
+      outFileName = "output_DYee.root";
+   else if (isDYmumu)
+      outFileName = "output_DYmumu.root";
 
    // Create output ROOT file
    TFile *out = new TFile(outFileName.c_str(), "RECREATE");
@@ -165,6 +179,8 @@ void MyClass::Loop()
       sigma_pb = 0.5071f;   // ttH(aa) signal
    } else if (isTTbar) {
       sigma_pb = 98.04f;    // ttbar background
+   } else if (isDYee || isDYmumu) {
+      sigma_pb = 1822.3333f; // DY->2e or DY->2mu (your provided xsec)
    }
 
    // Convert pb → fb
@@ -193,7 +209,6 @@ void MyClass::Loop()
    // ------------------------------------------------------------------------
    // 1. HISTOGRAM DEFINITIONS (RECO + GEN)
    // ------------------------------------------------------------------------
-
    // --- HIGGS (GEN) ---
    TH1F *h_H_pt   = new TH1F("h_H_pt",  "Higgs p_{T}; p_{T} [GeV]; Entries", 100, 0, 1000);
    TH1F *h_H_eta  = new TH1F("h_H_eta", "Higgs #eta; #eta; Entries",         60, -5, 5);
@@ -425,49 +440,46 @@ void MyClass::Loop()
    TH1F *h_HT = new TH1F("h_HT",
                          "H_{T} scalar sum of jet p_{T}; H_{T} [GeV]; Entries",
                          100, 0, 2000);
+
    // ==========================================================
    // NEW: FINAL RECO B-JET KINEMATICS (after full selection)
    // ==========================================================
 
    TH1F *h_bj1_pt_final = new TH1F(
-				   "h_bj1_pt_final",
-				   "Leading b-jet p_{T} (final); p_{T} [GeV]; Entries",
-				   100, 0, 500
-				   );
+                                   "h_bj1_pt_final",
+                                   "Leading b-jet p_{T} (final); p_{T} [GeV]; Entries",
+                                   100, 0, 500
+                                   );
 
    TH1F *h_bj1_eta_final = new TH1F(
-				    "h_bj1_eta_final",
-				    "Leading b-jet #eta (final); #eta; Entries",
-				    60, -2.5, 2.5
-				    );
+                                    "h_bj1_eta_final",
+                                    "Leading b-jet #eta (final); #eta; Entries",
+                                    60, -2.5, 2.5
+                                    );
 
    TH1F *h_bj2_pt_final = new TH1F(
-				   "h_bj2_pt_final",
-				   "Subleading b-jet p_{T} (final); p_{T} [GeV]; Entries",
-				   100, 0, 500
-				   );
+                                   "h_bj2_pt_final",
+                                   "Subleading b-jet p_{T} (final); p_{T} [GeV]; Entries",
+                                   100, 0, 500
+                                   );
 
    TH1F *h_bj2_eta_final = new TH1F(
-				    "h_bj2_eta_final",
-				    "Subleading b-jet #eta (final); #eta; Entries",
-				    60, -2.5, 2.5
-				    );
+                                    "h_bj2_eta_final",
+                                    "Subleading b-jet #eta (final); #eta; Entries",
+                                    60, -2.5, 2.5
+                                    );
 
    // Δm = | m(bj1) - m(bj2) |
    TH1F *h_dM_bj12 = new TH1F(
-			      "h_dM_bj12_final",
-			      "|m_{b1} - m_{b2}| (final); #Delta m [GeV]; Entries",
-			      80, 0, 200
-			      );
-
+                              "h_dM_bj12_final",
+                              "|m_{b1} - m_{b2}| (final); #Delta m [GeV]; Entries",
+                              80, 0, 200
+                              );
 
    // ==========================================================
    // NEW REAL-ANALYSIS HISTOGRAMS (after full selection)
    // ==========================================================
-   //
-   // IMPORTANT FIX: these ROOT names must be UNIQUE (not "h_dbj1_phi" etc),
-   // because you already have ranked histograms named "h_dbj1_phi" from h_dbj_phi[].
-   //
+
    TH1F *h_dR_dbj12 = new TH1F(
        "h_dR_dbj12_final",
        "#Delta R(double-b jet 1, double-b jet 2) (final); #Delta R; Entries",
@@ -521,17 +533,18 @@ void MyClass::Loop()
        "Subleading lepton #phi (final); #phi; Entries",
        64, -3.2, 3.2
    );
+
    TH1F *h_mll = new TH1F(
-			  "h_mll",
-			  "Dilepton invariant mass; m_{ll} [GeV]; Entries",
-			  100, 0, 200
-			  );
+                          "h_mll",
+                          "Dilepton invariant mass; m_{ll} [GeV]; Entries",
+                          100, 0, 200
+                          );
 
    TH1F *h_dRll = new TH1F(
-			   "h_dRll",
-			   "#Delta R(l_{1}, l_{2}); #Delta R; Entries",
-			   100, 0, 5
-			   );
+                           "h_dRll",
+                           "#Delta R(l_{1}, l_{2}); #Delta R; Entries",
+                           100, 0, 5
+                           );
 
    // ------------------------------------------------------------------------
    // Cut-flow counters (for RECO only)
@@ -545,7 +558,6 @@ void MyClass::Loop()
    Long64_t nCut6 = 0; // MET >= 40
    Long64_t nCut7 = 0; // |mH - 125| < 50
    Long64_t nCut8 = 0; // |mll - 70| > 20
- 
 
    // Helper for sorting GEN particles by pT
    auto sortParticles = [&](std::vector<int> &indices) {
@@ -1039,31 +1051,20 @@ void MyClass::Loop()
 
       if (PuppiMET_pt < 40.0) continue;
       ++nCut6;
-      // ==========================================================
-      // ==========================================================
+
       // Step 7: |mH - 125| < 50
-      // ==========================================================
-
-      const double mH_tmp =
-	(vec_doublebjets[0] + vec_doublebjets[1]).M();
-
+      const double mH_tmp = (vec_doublebjets[0] + vec_doublebjets[1]).M();
       if (std::fabs(mH_tmp - 125.0) >= 50.0) continue;
       ++nCut7;
 
-      // ==========================================================
-      // Step 8: |mll - 70| > 20
-      // ==========================================================
-
+      // Step 8: |mll - 90| > 20
       TLorentzVector ll = l1.p4 + l2.p4;
-
       if (std::fabs(ll.M() - 90.0) <= 20.0) continue;
       ++nCut8;
 
-
       // =====================================================================
-      // REAL ANALYSIS (FINAL SELECTION): FILL ONLY (NO DECLARATIONS)
+      // REAL ANALYSIS (FINAL SELECTION)
       // =====================================================================
-      //double bjet,Higgs and Met kinematic variables
       const TLorentzVector &db1 = vec_doublebjets[0];
       const TLorentzVector &db2 = vec_doublebjets[1];
 
@@ -1082,7 +1083,7 @@ void MyClass::Loop()
       // Δm(double-b, double-b)
       const double dM_dbj = std::fabs(db1.M() - db2.M());
       h_dM_bj12->Fill(dM_dbj, weight);
-      
+
       h_dbj1_pt ->Fill(db1.Pt(),  weight);
       h_dbj1_eta->Fill(db1.Eta(), weight);
 
@@ -1093,7 +1094,6 @@ void MyClass::Loop()
       for (const auto &j : vec_jet) HT += j.Pt();
       h_HT->Fill(HT, weight);
 
-      // --- NEW FINAL histograms (fixed) ---
       h_dR_dbj12->Fill(db1.DeltaR(db2), weight);
 
       h_dbj1_phi->Fill(db1.Phi(), weight);
@@ -1106,7 +1106,7 @@ void MyClass::Loop()
       h_lep2_pt ->Fill(l2.p4.Pt(),  weight);
       h_lep2_eta->Fill(l2.p4.Eta(), weight);
       h_lep2_phi->Fill(l2.p4.Phi(), weight);
-      // --- FINAL b-jet kinematics ---
+
       const TLorentzVector &bj1 = vec_bjets[0];
       const TLorentzVector &bj2 = vec_bjets[1];
 
@@ -1115,15 +1115,11 @@ void MyClass::Loop()
 
       h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
       h_bj2_eta_final->Fill(bj2.Eta(), weight);
-      // ==========================================================
-      // Dilepton observables 
-      // ==========================================================
 
       h_mll ->Fill(ll.M(), weight);
       h_dRll->Fill(l1.p4.DeltaR(l2.p4), weight);
 
    } // end event loop
-
    // ========================================================================
    // 3. EVENT YIELD CALCULATION & WEIGHT (RECO ONLY)
    // ========================================================================
@@ -1137,7 +1133,7 @@ void MyClass::Loop()
    std::cout << "\n=============================================================\n";
    std::cout << "                   EXPECTED EVENT YIELDS (RECO)              \n";
    std::cout << "=============================================================\n";
-   std::cout << " sigma(ttH)           = " << sigma_pb          << " pb\n";
+   std::cout << " sigma(sample)        = " << sigma_pb          << " pb\n";
    std::cout << " BR(W->lnu)^2         = " << fmt3(Br_Wlnu * Br_Wlnu) << "\n";
    std::cout << " L                    = " << L_int             << " fb^-1\n";
    std::cout << " -------------------------------------------\n";
@@ -1153,77 +1149,76 @@ void MyClass::Loop()
      std::snprintf(buf, sizeof(buf), "%.3f", e);
      return std::string(buf);
    };
-   
-std::cout << "=============================================================\n";
-std::cout << "                       CUT FLOW TABLE (RECO)                 \n";
-std::cout << "=============================================================\n";
-std::cout << std::left
-          << std::setw(35) << "Step / Requirement"
-          << std::setw(25) << "Raw (± stat)"
-          << std::setw(30) << "Weighted (± stat)"
-          << std::setw(15) << "Eff"
-          << std::endl;
-std::cout << "-------------------------------------------------------------\n";
 
-std::cout << std::left << std::setw(35) << "Step 0) Raw events"
-          << std::setw(25) << formatRaw(nentries)
-          << std::setw(30) << formatYield(nentries, w)
-          << std::setw(15) << "1.000"
-          << std::endl;
+   std::cout << "=============================================================\n";
+   std::cout << "                       CUT FLOW TABLE (RECO)                 \n";
+   std::cout << "=============================================================\n";
+   std::cout << std::left
+             << std::setw(35) << "Step / Requirement"
+             << std::setw(25) << "Raw (± stat)"
+             << std::setw(30) << "Weighted (± stat)"
+             << std::setw(15) << "Eff"
+             << std::endl;
+   std::cout << "-------------------------------------------------------------\n";
 
-std::cout << std::left << std::setw(35) << "Step 1) N leptons >= 2"
-          << std::setw(25) << formatRaw(nCut1)
-          << std::setw(30) << formatYield(nCut1, w)
-          << std::setw(15) << eff_decimal(nCut1)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 0) Raw events"
+             << std::setw(25) << formatRaw(nentries)
+             << std::setw(30) << formatYield(nentries, w)
+             << std::setw(15) << "1.000"
+             << std::endl;
 
-std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair"
-          << std::setw(25) << formatRaw(nCut2)
-          << std::setw(30) << formatYield(nCut2, w)
-          << std::setw(15) << eff_decimal(nCut2)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 1) N leptons >= 2"
+             << std::setw(25) << formatRaw(nCut1)
+             << std::setw(30) << formatYield(nCut1, w)
+             << std::setw(15) << eff_decimal(nCut1)
+             << std::endl;
 
-std::cout << std::left << std::setw(35) << "Step 3) Clean N jets >= 4"
-          << std::setw(25) << formatRaw(nCut3)
-          << std::setw(30) << formatYield(nCut3, w)
-          << std::setw(15) << eff_decimal(nCut3)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair"
+             << std::setw(25) << formatRaw(nCut2)
+             << std::setw(30) << formatYield(nCut2, w)
+             << std::setw(15) << eff_decimal(nCut2)
+             << std::endl;
 
-std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 2"
-          << std::setw(25) << formatRaw(nCut4)
-          << std::setw(30) << formatYield(nCut4, w)
-          << std::setw(15) << eff_decimal(nCut4)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 3) Clean N jets >= 4"
+             << std::setw(25) << formatRaw(nCut3)
+             << std::setw(30) << formatYield(nCut3, w)
+             << std::setw(15) << eff_decimal(nCut3)
+             << std::endl;
 
-std::cout << std::left << std::setw(35) << "Step 5) N double-b-jets >= 2"
-          << std::setw(25) << formatRaw(nCut5)
-          << std::setw(30) << formatYield(nCut5, w)
-          << std::setw(15) << eff_decimal(nCut5)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 2"
+             << std::setw(25) << formatRaw(nCut4)
+             << std::setw(30) << formatYield(nCut4, w)
+             << std::setw(15) << eff_decimal(nCut4)
+             << std::endl;
 
-std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
-          << std::setw(25) << formatRaw(nCut6)
-          << std::setw(30) << formatYield(nCut6, w)
-          << std::setw(15) << eff_decimal(nCut6)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 5) N double-b-jets >= 2"
+             << std::setw(25) << formatRaw(nCut5)
+             << std::setw(30) << formatYield(nCut5, w)
+             << std::setw(15) << eff_decimal(nCut5)
+             << std::endl;
 
-std::cout << std::left << std::setw(35) << "Step 7) |mH - 125| < 50"
-          << std::setw(25) << formatRaw(nCut7)
-          << std::setw(30) << formatYield(nCut7, w)
-          << std::setw(15) << eff_decimal(nCut7)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
+             << std::setw(25) << formatRaw(nCut6)
+             << std::setw(30) << formatYield(nCut6, w)
+             << std::setw(15) << eff_decimal(nCut6)
+             << std::endl;
 
-std::cout << std::left << std::setw(35) << "Step 8) |mll - 90| > 20"
-          << std::setw(25) << formatRaw(nCut8)
-          << std::setw(30) << formatYield(nCut8, w)
-          << std::setw(15) << eff_decimal(nCut8)
-          << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 7) |mH - 125| < 50"
+             << std::setw(25) << formatRaw(nCut7)
+             << std::setw(30) << formatYield(nCut7, w)
+             << std::setw(15) << eff_decimal(nCut7)
+             << std::endl;
 
-std::cout << "=============================================================\n";
+   std::cout << std::left << std::setw(35) << "Step 8) |mll - 90| > 20"
+             << std::setw(25) << formatRaw(nCut8)
+             << std::setw(30) << formatYield(nCut8, w)
+             << std::setw(15) << eff_decimal(nCut8)
+             << std::endl;
+
+   std::cout << "=============================================================\n";
 
    out->Write();
    out->Close();
 
    std::cout << "Analysis complete. Histograms saved to " << outFileName << std::endl;
-
 }
