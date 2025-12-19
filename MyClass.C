@@ -16,8 +16,10 @@
 #include <vector>
 #include <algorithm>
 #include <cstdio>
-
+#include <utility>
 using namespace std;
+
+
 
 // ============================================================================
 // Helper Functions (geometry & kinematics)
@@ -56,6 +58,50 @@ static inline double massFromPtEtaPhiM(double pt1, double eta1, double phi1, dou
    const double M2 = E * E - (px * px + py * py + pz * pz);
 
    return (M2 > 0.0) ? std::sqrt(M2) : 0.0;
+}
+
+// ----------------------------------------------------------------------
+// PDG statistical uncertainty (Gaussian / Poisson)
+// ----------------------------------------------------------------------
+double pdgStatError(Long64_t N)
+{
+  if (N >= 10) {
+    return std::sqrt(static_cast<double>(N));
+  }
+
+  const double alpha = 0.3173;
+
+  double low = 0.0;
+  if (N > 0) {
+    low = 0.5 * TMath::ChisquareQuantile(alpha / 2.0, 2.0 * N);
+  }
+
+  double up = 0.5 * TMath::ChisquareQuantile(1.0 - alpha / 2.0, 2.0 * (N + 1));
+
+  return 0.5 * (up - low);
+}
+//format raw
+std::string formatRaw(Long64_t N)
+{
+    const double err = pdgStatError(N);
+    
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%lld ± %.2f", N, err);
+    return std::string(buf);
+}
+
+// ----------------------------------------------------------------------
+// Format yield as "X ± Y" (weighted)
+// ----------------------------------------------------------------------
+std::string formatYield(Long64_t N, double w)
+{
+  const double err_raw = pdgStatError(N);
+  const double err_wgt = err_raw * w;
+  const double val_wgt = static_cast<double>(N) * w;
+
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%.2f ± %.2f", val_wgt, err_wgt);
+  return std::string(buf);
 }
 
 // ============================================================================
@@ -1107,62 +1153,73 @@ void MyClass::Loop()
      std::snprintf(buf, sizeof(buf), "%.3f", e);
      return std::string(buf);
    };
+   
+std::cout << "=============================================================\n";
+std::cout << "                       CUT FLOW TABLE (RECO)                 \n";
+std::cout << "=============================================================\n";
+std::cout << std::left
+          << std::setw(35) << "Step / Requirement"
+          << std::setw(25) << "Raw (± stat)"
+          << std::setw(30) << "Weighted (± stat)"
+          << std::setw(15) << "Eff"
+          << std::endl;
+std::cout << "-------------------------------------------------------------\n";
 
-   std::cout << "=============================================================\n";
-   std::cout << "                       CUT FLOW TABLE (RECO)                 \n";
-   std::cout << "=============================================================\n";
-   std::cout << std::left << std::setw(35) << "Step / Requirement"
-             << std::setw(15) << "Events"
-             << std::setw(15) << "Weighted"
-             << std::setw(15) << "Eff" << std::endl;
-   std::cout << "-------------------------------------------------------------\n";
+std::cout << std::left << std::setw(35) << "Step 0) Raw events"
+          << std::setw(25) << formatRaw(nentries)
+          << std::setw(30) << formatYield(nentries, w)
+          << std::setw(15) << "1.000"
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 0) Raw events"
-             << std::setw(15) << nentries
-             << std::setw(15) << fmt3(static_cast<double>(nentries) * w)
-             << std::setw(15) << "1.000" << std::endl;
+std::cout << std::left << std::setw(35) << "Step 1) N leptons >= 2"
+          << std::setw(25) << formatRaw(nCut1)
+          << std::setw(30) << formatYield(nCut1, w)
+          << std::setw(15) << eff_decimal(nCut1)
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 1) N leptons >= 2"
-             << std::setw(15) << nCut1
-             << std::setw(15) << fmt3(static_cast<double>(nCut1) * w)
-             << std::setw(15) << eff_decimal(nCut1) << std::endl;
+std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair"
+          << std::setw(25) << formatRaw(nCut2)
+          << std::setw(30) << formatYield(nCut2, w)
+          << std::setw(15) << eff_decimal(nCut2)
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair (e/μ)"
-             << std::setw(15) << nCut2
-             << std::setw(15) << fmt3(static_cast<double>(nCut2) * w)
-             << std::setw(15) << eff_decimal(nCut2) << std::endl;
+std::cout << std::left << std::setw(35) << "Step 3) Clean N jets >= 4"
+          << std::setw(25) << formatRaw(nCut3)
+          << std::setw(30) << formatYield(nCut3, w)
+          << std::setw(15) << eff_decimal(nCut3)
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 3) Clean N  jets >= 4"
-             << std::setw(15) << nCut3
-             << std::setw(15) << fmt3(static_cast<double>(nCut3) * w)
-             << std::setw(15) << eff_decimal(nCut3) << std::endl;
+std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 2"
+          << std::setw(25) << formatRaw(nCut4)
+          << std::setw(30) << formatYield(nCut4, w)
+          << std::setw(15) << eff_decimal(nCut4)
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 2"
-             << std::setw(15) << nCut4
-             << std::setw(15) << fmt3(static_cast<double>(nCut4) * w)
-             << std::setw(15) << eff_decimal(nCut4) << std::endl;
+std::cout << std::left << std::setw(35) << "Step 5) N double-b-jets >= 2"
+          << std::setw(25) << formatRaw(nCut5)
+          << std::setw(30) << formatYield(nCut5, w)
+          << std::setw(15) << eff_decimal(nCut5)
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 5) N double-b-jets >= 2"
-             << std::setw(15) << nCut5
-             << std::setw(15) << fmt3(static_cast<double>(nCut5) * w)
-             << std::setw(15) << eff_decimal(nCut5) << std::endl;
+std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
+          << std::setw(25) << formatRaw(nCut6)
+          << std::setw(30) << formatYield(nCut6, w)
+          << std::setw(15) << eff_decimal(nCut6)
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
-             << std::setw(15) << nCut6
-             << std::setw(15) << fmt3(static_cast<double>(nCut6) * w)
-             << std::setw(15) << eff_decimal(nCut6) << std::endl;
-   std::cout << std::left << std::setw(35) << "Step 7) |mH - 125| < 50"
-	     << std::setw(15) << nCut7
-	     << std::setw(15) << fmt3(static_cast<double>(nCut7) * w)
-	     << std::setw(15) << eff_decimal(nCut7) << std::endl;
+std::cout << std::left << std::setw(35) << "Step 7) |mH - 125| < 50"
+          << std::setw(25) << formatRaw(nCut7)
+          << std::setw(30) << formatYield(nCut7, w)
+          << std::setw(15) << eff_decimal(nCut7)
+          << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 8) |mll - 70| > 20"
-	     << std::setw(15) << nCut8
-	     << std::setw(15) << fmt3(static_cast<double>(nCut8) * w)
-	     << std::setw(15) << eff_decimal(nCut8) << std::endl;
+std::cout << std::left << std::setw(35) << "Step 8) |mll - 90| > 20"
+          << std::setw(25) << formatRaw(nCut8)
+          << std::setw(30) << formatYield(nCut8, w)
+          << std::setw(15) << eff_decimal(nCut8)
+          << std::endl;
 
-
-   std::cout << "=============================================================\n";
+std::cout << "=============================================================\n";
 
    out->Write();
    out->Close();
