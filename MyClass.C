@@ -348,7 +348,6 @@ void MyClass::Loop()
    const int MAXMU    = 2;
    const int MAXBJET  = 2;  // ranked b-jets
    const int MAXDBJET = 2;  // ranked double-b-tagged jets
-
    TH1F *h_j_pt [MAXJET];
    TH1F *h_j_eta[MAXJET];
    TH1F *h_j_phi[MAXJET];
@@ -840,7 +839,6 @@ void MyClass::Loop()
 
       std::vector<TLorentzVector> vec_ele;
       std::vector<TLorentzVector> vec_muons;
-      std::vector<TLorentzVector> vec_jet;
       std::vector<TLorentzVector> vec_cjet;
       std::vector<TLorentzVector> vec_bjets;
       std::vector<TLorentzVector> vec_doublebjets;
@@ -878,43 +876,58 @@ void MyClass::Loop()
          leptons.push_back(lep);
       }
 
-      for (int i = 0; i < nJet; ++i) {
-         float pt  = Jet_pt[i];
-         float eta = Jet_eta[i];
-         float phi = Jet_phi[i];
+      // ====================================================================
+      // JET CONSTRUCTION WITH PROPER CROSS CLEANING
+      // ====================================================================
 
-         if (pt <= 20.0) continue;
-         if (std::fabs(eta) >= 2.5) continue;
+      for (int i = 0; i < nJet; ++i) {
+
+         if (Jet_pt[i] <= 20.0) continue;
+         if (std::fabs(Jet_eta[i]) >= 2.5) continue;
 
          TLorentzVector j;
-         j.SetPtEtaPhiM(pt, eta, phi, Jet_mass[i]);
-         vec_jet.push_back(j);
+         j.SetPtEtaPhiM(Jet_pt[i], Jet_eta[i], Jet_phi[i], Jet_mass[i]);
 
-         bool isDoubleB = (Jet_btagUParTAK4probbb[i] > 0.12f);
+         // BEFORE cleaning ΔR (raw jets passing pt/eta)
+         for (const auto &el : vec_ele)   h_dR_jet_ele_before->Fill(j.DeltaR(el), weight);
+         for (const auto &mu : vec_muons) h_dR_jet_mu_before ->Fill(j.DeltaR(mu), weight);
 
-         if (isDoubleB) {
-           vec_doublebjets.push_back(j);
+         // Cross-clean against ALL selected leptons
+         bool overlap = false;
+         for (const auto &lep : leptons) {
+            if (j.DeltaR(lep.p4) < 0.4) {
+               overlap = true;
+               break;
+            }
+         }
+         if (overlap) continue;
+
+         // Clean jet
+         vec_cjet.push_back(j);
+
+         // Tag clean jet
+         if (Jet_btagUParTAK4probbb[i] > 0.12f) {
+            vec_doublebjets.push_back(j);
          }
          else if (Jet_btagUParTAK4B[i] > 0.4648f) {
-           vec_bjets.push_back(j);
+            vec_bjets.push_back(j);
          }
       }
 
-      auto cmpPt = [](const TLorentzVector &a, const TLorentzVector &b) { return a.Pt() > b.Pt(); };
+         auto cmpPt = [](const TLorentzVector &a, const TLorentzVector &b) { return a.Pt() > b.Pt(); };
 
       std::sort(vec_ele.begin(),        vec_ele.end(),        cmpPt);
       std::sort(vec_muons.begin(),      vec_muons.end(),      cmpPt);
-      std::sort(vec_jet.begin(),        vec_jet.end(),        cmpPt);
+      std::sort(vec_cjet.begin(), vec_cjet.end(), cmpPt);
       std::sort(vec_bjets.begin(),      vec_bjets.end(),      cmpPt);
       std::sort(vec_doublebjets.begin(),vec_doublebjets.end(),cmpPt);
-
       std::sort(leptons.begin(), leptons.end(),
                 [](const RecoLepton &a, const RecoLepton &b) { return a.p4.Pt() > b.p4.Pt(); });
 
       // PRE-SELECTION HISTOGRAMS
       h_nEle->Fill(vec_ele.size(),   weight);
       h_nMu ->Fill(vec_muons.size(), weight);
-      h_nJet->Fill(vec_jet.size(),   weight);
+      h_nJet->Fill(vec_cjet.size(),   weight);
 
       h_nBjet->Fill(vec_bjets.size(), weight);
       h_nDoubleB->Fill(vec_doublebjets.size(), weight);
@@ -931,10 +944,10 @@ void MyClass::Loop()
          h_mu_phi->Fill(mu.Phi(), weight);
       }
 
-      for (const auto &jet : vec_jet) {
-         h_jet_pt ->Fill(jet.Pt(),  weight);
-         h_jet_eta->Fill(jet.Eta(), weight);
-         h_jet_phi->Fill(jet.Phi(), weight);
+      for (const auto &jet : vec_cjet) {
+        h_jet_pt ->Fill(jet.Pt(),  weight);
+        h_jet_eta->Fill(jet.Eta(), weight);
+        h_jet_phi->Fill(jet.Phi(), weight);
       }
 
       for (const auto &bj : vec_bjets) {
@@ -968,12 +981,13 @@ void MyClass::Loop()
       }
 
       {
-         const int maxJet = std::min<int>(vec_jet.size(), MAXJET);
-         for (int i = 0; i < maxJet; ++i) {
-           h_j_pt[i] ->Fill(vec_jet[i].Pt(),  weight);
-           h_j_eta[i]->Fill(vec_jet[i].Eta(), weight);
-           h_j_phi[i]->Fill(vec_jet[i].Phi(), weight);
-         }
+        const int maxJet = std::min<int>(vec_cjet.size(), MAXJET);
+        for (int i = 0; i < maxJet; ++i) {
+          h_j_pt[i] ->Fill(vec_cjet[i].Pt(),  weight);
+          h_j_eta[i]->Fill(vec_cjet[i].Eta(), weight);
+          h_j_phi[i]->Fill(vec_cjet[i].Phi(), weight);
+        }
+
       }
 
       {
@@ -1002,32 +1016,39 @@ void MyClass::Loop()
       if (Nleptons < 2) continue;
       ++nCut1;
 
-      for (const auto &jet : vec_jet) {
-         for (const auto &el : vec_ele)  h_dR_jet_ele_before->Fill(jet.DeltaR(el), weight);
-         for (const auto &mu : vec_muons) h_dR_jet_mu_before ->Fill(jet.DeltaR(mu), weight);
-      }
+      // -------------------------------------------------------------------
+      // ORIGINAL (broken) second cleaning block using vec_jet was here.
+      // Kept for reference but commented out so you compile and do not
+      // double-clean jets.
+      //
+      // for (const auto &jet : vec_jet) {
+      //    for (const auto &el : vec_ele)  h_dR_jet_ele_before->Fill(jet.DeltaR(el), weight);
+      //    for (const auto &mu : vec_muons) h_dR_jet_mu_before ->Fill(jet.DeltaR(mu), weight);
+      // }
+      //
+      // const double dRclean = 0.4;
+      // for (const auto &jet : vec_jet) {
+      //    bool keep = true;
+      //
+      //    for (const auto &el : vec_ele) {
+      //       if (jet.DeltaR(el) < dRclean) { keep = false; break; }
+      //    }
+      //    if (keep) {
+      //       for (const auto &mu : vec_muons) {
+      //          if (jet.DeltaR(mu) < dRclean) { keep = false; break; }
+      //       }
+      //    }
+      //    if (keep) vec_cjet.push_back(jet);
+      // }
+      // -------------------------------------------------------------------
 
-      const double dRclean = 0.4;
-      for (const auto &jet : vec_jet) {
-         bool keep = true;
-
-         for (const auto &el : vec_ele) {
-            if (jet.DeltaR(el) < dRclean) { keep = false; break; }
-         }
-         if (keep) {
-            for (const auto &mu : vec_muons) {
-               if (jet.DeltaR(mu) < dRclean) { keep = false; break; }
-            }
-         }
-         if (keep) vec_cjet.push_back(jet);
-      }
-
-      h_nCJet->Fill(vec_cjet.size(), weight);
-
+      // AFTER-cleaning ΔR (use the already-cleaned jets vec_cjet)
       for (const auto &jet : vec_cjet) {
          for (const auto &el : vec_ele)   h_dR_jet_ele_after->Fill(jet.DeltaR(el), weight);
          for (const auto &mu : vec_muons) h_dR_jet_mu_after ->Fill(jet.DeltaR(mu), weight);
       }
+
+      h_nCJet->Fill(vec_cjet.size(), weight);
 
       const int Njets = vec_cjet.size();
 
@@ -1091,7 +1112,7 @@ void MyClass::Loop()
       h_dbj2_eta->Fill(db2.Eta(), weight);
 
       double HT = 0.0;
-      for (const auto &j : vec_jet) HT += j.Pt();
+      for (const auto &j : vec_cjet) HT += j.Pt();
       h_HT->Fill(HT, weight);
 
       h_dR_dbj12->Fill(db1.DeltaR(db2), weight);
