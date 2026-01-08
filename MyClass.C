@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <utility>
+#include <TTree.h>
 using namespace std;
 
 // ============================================================================
@@ -154,8 +155,23 @@ void MyClass::Loop()
    else if (isDYmumu)
       outFileName = "output_DYmumu.root";
 
-   // Create output ROOT file
-   TFile *out = new TFile(outFileName.c_str(), "RECREATE");
+ // Create output ROOT file (histograms)
+TFile *out = new TFile(outFileName.c_str(), "RECREATE");
+out->cd();  // <<< ADD: make histogram file current
+
+// =======================================================
+// Output file for the ntuple (tree) + tree definition
+// =======================================================
+std::string treeFileName = outFileName;
+treeFileName.replace(treeFileName.find("output_"), 7, "tree_"); // output_signal.root -> tree_signal.root
+
+TFile *outTree = new TFile(treeFileName.c_str(), "RECREATE");
+outTree->cd(); // <<< ADD: make tree file current
+
+TTree *my_tree = new TTree("my_tree", "Final selection variables");
+my_tree->SetDirectory(outTree); // <<< ADD: ensure tree is owned by outTree
+
+out->cd(); // <<< ADD: CRITICAL: switch back BEFORE creating any histograms
 
    //
    //  wgt_prime: use for RAW histograms      (weight = 1)
@@ -205,7 +221,92 @@ void MyClass::Loop()
 
    const long long Nexp_int = static_cast<long long>(std::llround(Nexp));
    const double w = static_cast<double>(wgt);       // alias to keep your printout using "w"
+   // =======================================================
+   // NEW: Sample ID (so you know what you wrote)
+   // =======================================================
+   Int_t sample = -1;
+   if (isSignal)      sample = 0;
+   else if (isTTbar)  sample = 1;
+   else if (isDYee)   sample = 2;
+   else if (isDYmumu) sample = 3;
 
+   // =======================================================
+   // NEW: Tree branch variables (plain C types)
+   // Note: do NOT name a branch variable "HT" because you
+   // already use "double HT" later. Use HT_tree.
+   // =======================================================
+   Float_t w_tree      = static_cast<Float_t>(wgt);       // Nexp/Nstat
+   Float_t wprime_tree = static_cast<Float_t>(wgt_prime); // =1 currently
+   
+   Int_t   nlep_tree;
+   Int_t   njets_tree;
+   Int_t   nbjets_tree;
+   Int_t   ndbjets_tree;
+   
+   Float_t met_pt_tree;
+   Float_t met_phi_tree;
+
+   Float_t h_m_tree;
+   Float_t h_pt_tree;
+   Float_t h_eta_tree;
+   
+   Float_t db1_m_tree, db1_pt_tree, db1_eta_tree, db1_phi_tree;
+   Float_t db2_m_tree, db2_pt_tree, db2_eta_tree, db2_phi_tree;
+   
+   Float_t dR_db12_tree;
+   Float_t dM_db12_tree;
+
+   Float_t HT_tree;
+
+   Float_t lep1_pt_tree, lep1_eta_tree, lep1_phi_tree;
+   
+   Float_t bj1_pt_tree, bj1_eta_tree;
+   Float_t bj2_pt_tree, bj2_eta_tree;
+
+   // =======================================================
+   // NEW: Branch definitions
+   // =======================================================
+   my_tree->Branch("sample", &sample, "sample/I");
+   
+   my_tree->Branch("w",      &w_tree,      "w/F");
+   my_tree->Branch("wprime", &wprime_tree, "wprime/F");
+   
+   my_tree->Branch("nlep",   &nlep_tree,   "nlep/I");
+   my_tree->Branch("njets",  &njets_tree,  "njets/I");
+   my_tree->Branch("nbjets", &nbjets_tree, "nbjets/I");
+   my_tree->Branch("ndbjets",&ndbjets_tree,"ndbjets/I");
+   
+   my_tree->Branch("met_pt",  &met_pt_tree,  "met_pt/F");
+   my_tree->Branch("met_phi", &met_phi_tree, "met_phi/F");
+   
+   my_tree->Branch("h_m",   &h_m_tree,   "h_m/F");
+   my_tree->Branch("h_pt",  &h_pt_tree,  "h_pt/F");
+   my_tree->Branch("h_eta", &h_eta_tree, "h_eta/F");
+   
+   my_tree->Branch("db1_m",   &db1_m_tree,   "db1_m/F");
+   my_tree->Branch("db1_pt",  &db1_pt_tree,  "db1_pt/F");
+   my_tree->Branch("db1_eta", &db1_eta_tree, "db1_eta/F");
+   my_tree->Branch("db1_phi", &db1_phi_tree, "db1_phi/F");
+   
+   my_tree->Branch("db2_m",   &db2_m_tree,   "db2_m/F");
+   my_tree->Branch("db2_pt",  &db2_pt_tree,  "db2_pt/F");
+   my_tree->Branch("db2_eta", &db2_eta_tree, "db2_eta/F");
+   my_tree->Branch("db2_phi", &db2_phi_tree, "db2_phi/F");
+   
+   my_tree->Branch("dR_db12", &dR_db12_tree, "dR_db12/F");
+   my_tree->Branch("dM_db12", &dM_db12_tree, "dM_db12/F");
+   
+   my_tree->Branch("HT", &HT_tree, "HT/F");
+   
+   my_tree->Branch("lep1_pt",  &lep1_pt_tree,  "lep1_pt/F");
+   my_tree->Branch("lep1_eta", &lep1_eta_tree, "lep1_eta/F");
+   my_tree->Branch("lep1_phi", &lep1_phi_tree, "lep1_phi/F");
+   
+   my_tree->Branch("bj1_pt",  &bj1_pt_tree,  "bj1_pt/F");
+   my_tree->Branch("bj1_eta", &bj1_eta_tree, "bj1_eta/F");
+   my_tree->Branch("bj2_pt",  &bj2_pt_tree,  "bj2_pt/F");
+   my_tree->Branch("bj2_eta", &bj2_eta_tree, "bj2_eta/F");
+   
    // ------------------------------------------------------------------------
    // 1. HISTOGRAM DEFINITIONS (RECO + GEN)
    // ------------------------------------------------------------------------
@@ -515,48 +616,47 @@ void MyClass::Loop()
        64, -3.2, 3.2
    );
 
-   TH1F *h_lep2_pt = new TH1F(
-       "h_lep2_pt_final",
-       "Subleading lepton p_{T} (final); p_{T} [GeV]; Entries",
-       100, 0, 500
-   );
+   //   TH1F *h_lep2_pt = new TH1F(
+   // "h_lep2_pt_final",
+   // "Subleading lepton p_{T} (final); p_{T} [GeV]; Entries",
+	 //      100, 0, 500
+	 //);
 
-   TH1F *h_lep2_eta = new TH1F(
-       "h_lep2_eta_final",
-       "Subleading lepton #eta (final); #eta; Entries",
-       60, -2.5, 2.5
-   );
+	 // TH1F *h_lep2_eta = new TH1F(
+	 //    "h_lep2_eta_final",
+	 //    "Subleading lepton #eta (final); #eta; Entries",
+	 //    60, -2.5, 2.5
+	 // );
 
-   TH1F *h_lep2_phi = new TH1F(
-       "h_lep2_phi_final",
-       "Subleading lepton #phi (final); #phi; Entries",
-       64, -3.2, 3.2
-   );
+	 // TH1F *h_lep2_phi = new TH1F(
+	 //   "h_lep2_phi_final",
+	 //    "Subleading lepton #phi (final); #phi; Entries",
+	 //    64, -3.2, 3.2
+	 //);
 
-   TH1F *h_mll = new TH1F(
-                          "h_mll",
-                          "Dilepton invariant mass; m_{ll} [GeV]; Entries",
-                          100, 0, 200
-                          );
+	 //TH1F *h_mll = new TH1F(
+	 //     "h_mll",
+	 //      "Dilepton invariant mass; m_{ll} [GeV]; Entries",
+	 //           100, 0, 200
+	 //         );
 
-   TH1F *h_dRll = new TH1F(
-                           "h_dRll",
-                           "#Delta R(l_{1}, l_{2}); #Delta R; Entries",
-                           100, 0, 5
-                           );
+	 // TH1F *h_dRll = new TH1F(
+	 //       "h_dRll",
+	 //     "#Delta R(l_{1}, l_{2}); #Delta R; Entries",
+	 //     100, 0, 5
+	 //      );
 
    // ------------------------------------------------------------------------
    // Cut-flow counters (for RECO only)
    // ------------------------------------------------------------------------
 
-   Long64_t nCut1 = 0; // N leptons >= 2
-   Long64_t nCut2 = 0; // OS lepton pair
-   Long64_t nCut3 = 0; // N jets >= 4 (using CLEAN jets)
-   Long64_t nCut4 = 0; // N b-jets >= 2
-   Long64_t nCut5 = 0; // N double-b-jets >= 2
-   Long64_t nCut6 = 0; // MET >= 40
-   Long64_t nCut7 = 0; // |mH - 125| < 50
-   Long64_t nCut8 = 0; // |mll - 70| > 20
+   Long64_t nCut1 = 0; // N leptons = 1
+   Long64_t nCut2 = 0; // N jets >= 4 (using CLEAN jets)
+   Long64_t nCut3 = 0; // N b-jets >= 2
+   Long64_t nCut4 = 0; // N double-b-jets >= 2
+   Long64_t nCut5 = 0; // MET >= 40
+   Long64_t nCut6 = 0; // |mH - 125| < 50
+ 
 
    // Helper for sorting GEN particles by pT
    auto sortParticles = [&](std::vector<int> &indices) {
@@ -1013,8 +1113,9 @@ void MyClass::Loop()
       const int Nbjets   = vec_bjets.size();
       const int Ndoubleb = vec_doublebjets.size();
 
-      if (Nleptons < 2) continue;
+      if (Nleptons != 1) continue;
       ++nCut1;
+      RecoLepton &l1 = leptons[0];
 
       // -------------------------------------------------------------------
       // ORIGINAL (broken) second cleaning block using vec_jet was here.
@@ -1051,37 +1152,32 @@ void MyClass::Loop()
       h_nCJet->Fill(vec_cjet.size(), weight);
 
       const int Njets = vec_cjet.size();
+      //bool os_flavour_ok = false;
+      //RecoLepton &l1 = leptons[0];
+      //RecoLepton &l2 = leptons[1];
 
-      bool os_flavour_ok = false;
-      RecoLepton &l1 = leptons[0];
-      RecoLepton &l2 = leptons[1];
+      //if (l1.charge * l2.charge < 0) os_flavour_ok = true;
 
-      if (l1.charge * l2.charge < 0) os_flavour_ok = true;
-
-      if (!os_flavour_ok) continue;
-      ++nCut2;
+      //if (!os_flavour_ok) continue;
+      //++nCut2;
 
       if (Njets < 4) continue;
-      ++nCut3;
+      ++nCut2;
 
       if (Nbjets < 2) continue;
-      ++nCut4;
+      ++nCut3;
 
       if (Ndoubleb < 2) continue;
-      ++nCut5;
+      ++nCut4;
 
       if (PuppiMET_pt < 40.0) continue;
-      ++nCut6;
+      ++nCut5;
 
       // Step 7: |mH - 125| < 50
       const double mH_tmp = (vec_doublebjets[0] + vec_doublebjets[1]).M();
       if (std::fabs(mH_tmp - 125.0) >= 50.0) continue;
-      ++nCut7;
+      ++nCut6;
 
-      // Step 8: |mll - 90| > 20
-      TLorentzVector ll = l1.p4 + l2.p4;
-      if (std::fabs(ll.M() - 90.0) <= 20.0) continue;
-      ++nCut8;
 
       // =====================================================================
       // REAL ANALYSIS (FINAL SELECTION)
@@ -1124,9 +1220,9 @@ void MyClass::Loop()
       h_lep1_eta->Fill(l1.p4.Eta(), weight);
       h_lep1_phi->Fill(l1.p4.Phi(), weight);
 
-      h_lep2_pt ->Fill(l2.p4.Pt(),  weight);
-      h_lep2_eta->Fill(l2.p4.Eta(), weight);
-      h_lep2_phi->Fill(l2.p4.Phi(), weight);
+      //  h_lep2_pt ->Fill(l2.p4.Pt(),  weight);
+      // h_lep2_eta->Fill(l2.p4.Eta(), weight);
+      // h_lep2_phi->Fill(l2.p4.Phi(), weight);
 
       const TLorentzVector &bj1 = vec_bjets[0];
       const TLorentzVector &bj2 = vec_bjets[1];
@@ -1136,10 +1232,48 @@ void MyClass::Loop()
 
       h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
       h_bj2_eta_final->Fill(bj2.Eta(), weight);
+      // =======================================================
+      // NEW: Fill ntuple (tree) for final selection events only
+      // =======================================================
+      nlep_tree    = Nleptons;       // should be 1 here
+      njets_tree   = Njets;
+      nbjets_tree  = Nbjets;
+      ndbjets_tree = Ndoubleb;
+      
+      met_pt_tree  = PuppiMET_pt;
+      met_phi_tree = PuppiMET_phi;
+      
+      h_m_tree   = HiggsCand.M();
+      h_pt_tree  = HiggsCand.Pt();
+      h_eta_tree = HiggsCand.Eta();
+      
+      db1_m_tree   = db1.M();
+      db1_pt_tree  = db1.Pt();
+      db1_eta_tree = db1.Eta();
+      db1_phi_tree = db1.Phi();
+      
+      db2_m_tree   = db2.M();
+      db2_pt_tree  = db2.Pt();
+      db2_eta_tree = db2.Eta();
+      db2_phi_tree = db2.Phi();
 
-      h_mll ->Fill(ll.M(), weight);
-      h_dRll->Fill(l1.p4.DeltaR(l2.p4), weight);
-
+      dR_db12_tree = db1.DeltaR(db2);
+      dM_db12_tree = static_cast<Float_t>(dM_dbj);
+      
+      // IMPORTANT: your local variable is named "HT" already
+      HT_tree      = static_cast<Float_t>(HT);
+      
+      lep1_pt_tree  = l1.p4.Pt();
+      lep1_eta_tree = l1.p4.Eta();
+      lep1_phi_tree = l1.p4.Phi();
+      
+      bj1_pt_tree  = bj1.Pt();
+      bj1_eta_tree = bj1.Eta();
+      bj2_pt_tree  = bj2.Pt();
+      bj2_eta_tree = bj2.Eta();
+      
+      my_tree->Fill();
+      
    } // end event loop
    // ========================================================================
    // 3. EVENT YIELD CALCULATION & WEIGHT (RECO ONLY)
@@ -1188,58 +1322,53 @@ void MyClass::Loop()
              << std::setw(15) << "1.000"
              << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 1) N leptons >= 2"
+   std::cout << std::left << std::setw(35) << "Step 1) N leptons =1"
              << std::setw(25) << formatRaw(nCut1)
              << std::setw(30) << formatYield(nCut1, w)
              << std::setw(15) << eff_decimal(nCut1)
              << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair"
+   std::cout << std::left << std::setw(35) << "Step 2) Clean N jets >= 4"
              << std::setw(25) << formatRaw(nCut2)
              << std::setw(30) << formatYield(nCut2, w)
              << std::setw(15) << eff_decimal(nCut2)
              << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 3) Clean N jets >= 4"
+   std::cout << std::left << std::setw(35) << "Step 3) N b-jets >= 2"
              << std::setw(25) << formatRaw(nCut3)
              << std::setw(30) << formatYield(nCut3, w)
              << std::setw(15) << eff_decimal(nCut3)
              << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 4) N b-jets >= 2"
+   std::cout << std::left << std::setw(35) << "Step 4) N double-b-jets >= 2"
              << std::setw(25) << formatRaw(nCut4)
              << std::setw(30) << formatYield(nCut4, w)
              << std::setw(15) << eff_decimal(nCut4)
              << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 5) N double-b-jets >= 2"
+   std::cout << std::left << std::setw(35) << "Step 5) MET >= 40 GeV"
              << std::setw(25) << formatRaw(nCut5)
              << std::setw(30) << formatYield(nCut5, w)
              << std::setw(15) << eff_decimal(nCut5)
              << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
+   std::cout << std::left << std::setw(35) << "Step 6) |mH - 125| < 50"
              << std::setw(25) << formatRaw(nCut6)
              << std::setw(30) << formatYield(nCut6, w)
              << std::setw(15) << eff_decimal(nCut6)
              << std::endl;
 
-   std::cout << std::left << std::setw(35) << "Step 7) |mH - 125| < 50"
-             << std::setw(25) << formatRaw(nCut7)
-             << std::setw(30) << formatYield(nCut7, w)
-             << std::setw(15) << eff_decimal(nCut7)
-             << std::endl;
-
-   std::cout << std::left << std::setw(35) << "Step 8) |mll - 90| > 20"
-             << std::setw(25) << formatRaw(nCut8)
-             << std::setw(30) << formatYield(nCut8, w)
-             << std::setw(15) << eff_decimal(nCut8)
-             << std::endl;
 
    std::cout << "=============================================================\n";
-
    out->Write();
    out->Close();
 
+   // NEW: write tree file
+   outTree->cd();
+   my_tree->Write();
+   outTree->Close();
+
    std::cout << "Analysis complete. Histograms saved to " << outFileName << std::endl;
+   std::cout << "Final-selection tree saved to " << treeFileName << std::endl;
+
 }

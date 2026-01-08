@@ -171,21 +171,15 @@ void reconplot(int mode = 1, int sample = 0) {
 
         c_bj->SaveAs(("final_bjets" + tag + ".png").c_str());
 
-        // ================= FINAL LEPTONS (SYMMETRIC) =================
-        TCanvas *c_lep = new TCanvas("c_lep", "Final leptons", 2000, 1000);
-        c_lep->Divide(4,2);
+        // ================= FINAL LEPTON (SINGLE-LEPTON) =================
+        TCanvas *c_lep = new TCanvas("c_lep", "Final lepton", 1600, 600);
+        c_lep->Divide(3,1);
 
         c_lep->cd(1); if (auto h = H("h_lep1_pt_final"))  { h->Draw("HIST"); gPad->SetGrid(); }
         c_lep->cd(2); if (auto h = H("h_lep1_eta_final")) { h->Draw("HIST"); gPad->SetGrid(); }
         c_lep->cd(3); if (auto h = H("h_lep1_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
-        c_lep->cd(4); if (auto h = H("h_dRll"))           { h->Draw("HIST"); gPad->SetGrid(); }
 
-        c_lep->cd(5); if (auto h = H("h_lep2_pt_final"))  { h->Draw("HIST"); gPad->SetGrid(); }
-        c_lep->cd(6); if (auto h = H("h_lep2_eta_final")) { h->Draw("HIST"); gPad->SetGrid(); }
-        c_lep->cd(7); if (auto h = H("h_lep2_phi_final")) { h->Draw("HIST"); gPad->SetGrid(); }
-        c_lep->cd(8); if (auto h = H("h_mll"))            { h->Draw("HIST"); gPad->SetGrid(); }
-
-        c_lep->SaveAs(("final_leptons" + tag + ".png").c_str());
+        c_lep->SaveAs(("final_lepton" + tag + ".png").c_str());
 
         return;
     }
