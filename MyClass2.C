@@ -1,5 +1,4 @@
 
-// ======================= PART 1/3 =======================
 #define MyClass_cxx
 #include "MyClass.h"
 #include <TH1F.h>
@@ -17,6 +16,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <utility>
+#include <cctype>
+#include <TTree.h>
+#include <regex>
 
 using namespace std;
 
@@ -103,56 +105,163 @@ void MyClass::Loop() {
   const Long64_t nentries = fChain->GetEntriesFast();
   std::cout << "Processing " << nentries << " entries from Tree." << std::endl;
 
+
   // ------------------------------------------------------------------------
   // detect which sample this file is
   // ------------------------------------------------------------------------
-  Bool_t isSignal = false;
-  Bool_t isTTbar  = false;
-  Bool_t isDYee   = false;
- Bool_t isDYmumu = false;
- 
- TFile *currentFile = fChain->GetCurrentFile();
- std::string fname = currentFile ? std::string(currentFile->GetName()) : "";
+  Bool_t isSignal  = false;
+  Bool_t isTTbar   = false;
+  Bool_t isDYee    = false;
+  Bool_t isDYmumu  = false;
+  Bool_t isVBF_Hbb = false;
+  Bool_t isGGH_Hbb = false;
+  Bool_t isTTH_Hbb = false;
+  std::string signalTag = "";  // will hold e.g. "tth12gev", "tth25gev", "tth60gev"
 
- // Accept both signal mass points (12 and 25)
- if (fname.find("TTH12Gev") != std::string::npos || fname.find("TTH25Gev") != std::string::npos) {
-   isSignal = true;
- } else if (fname.find("TTto2L2Nu") != std::string::npos) {
-   isTTbar = true;
- } else if (fname.find("DYto2E4JETS") != std::string::npos) {
-   isDYee = true;
- } else if (fname.find("DYto2MU4JETS") != std::string::npos) {
-   isDYmumu = true;
+  TFile *currentFile = fChain->GetCurrentFile();
+  std::string fname = currentFile ? std::string(currentFile->GetName()) : "";
+  
+  // make lowercase copy for robust matching
+  std::string f = fname;
+  std::transform(f.begin(), f.end(), f.begin(),
+		 [](unsigned char c){ return std::tolower(c); });
+  // Signal mass points (auto-detect: tth12gev, tth25gev, tth60gev, ...)
+  std::smatch m;
+  std::regex re("tth\\d+gev");   // f is already lowercase
+  
+  if (std::regex_search(f, m, re)) {
+    isSignal = true;
+    signalTag = m.str(0);        // e.g. "tth60gev"
+  }
+  // Backgrounds
+  else if (f.find("ttto2l2nu") != std::string::npos) {
+    isTTbar = true;
+  }
+  else if (f.find("dyto2e4jets") != std::string::npos) {
+    isDYee = true;
+}
+  else if (f.find("dyto2mu4jets") != std::string::npos) {
+    isDYmumu = true;
+  }
+  // New H->bb samples (match your actual filenames)
+  else if (f.find("vbfhto2b") != std::string::npos || f.find("vbfhtobb") != std::string::npos) {
+    isVBF_Hbb = true;
+  }
+else if (f.find("glugluhtobb") != std::string::npos) {
+  isGGH_Hbb = true;
  }
-
-  // ------------------------------------------------------------------------
-  // Output file name
-  // ------------------------------------------------------------------------
+ else if (f.find("tthhtobb") != std::string::npos || (f.find("tth") != std::string::npos && f.find("htobb") != std::string::npos)) {
+   isTTH_Hbb = true;
+ }
+ // ------------------------------------------------------------------------
+ // Output file name
+ // ------------------------------------------------------------------------
   std::string outFileName = "output_unknown.root";
-  if (isSignal)      outFileName = "output_signal.root";
+  if (isSignal) {
+    outFileName = "output_signal_" + signalTag + ".root";  // e.g. output_signal_tth60gev.root
+  }
+  else if (isTTbar)  outFileName = "output_ttbar.root";
   else if (isTTbar)  outFileName = "output_ttbar.root";
   else if (isDYee)   outFileName = "output_DYee.root";
   else if (isDYmumu) outFileName = "output_DYmumu.root";
+  else if (isTTH_Hbb)  outFileName = "output_TTH_Hbb.root";
+  else if (isVBF_Hbb)  outFileName = "output_VBF_Hbb.root";
+  else if (isGGH_Hbb)  outFileName = "output_GGH_Hbb.root";
+ // =======================================================
+ // Output ROOT file for histograms
+ // =======================================================
+ TFile *out = new TFile(outFileName.c_str(), "RECREATE");
+ out->cd(); // make sure histograms go here
+ TTree *outTree = new TTree("AnalysisTree", "Reduced analysis tree");
+ outTree->SetDirectory(out);   // tree is owned by the SAME file as histograms
 
-  // Create output ROOT file
-  TFile *out = new TFile(outFileName.c_str(), "RECREATE");
+ // Event-level
+ Long64_t t_event = 0;
+ double   t_weight = 1.0;
+ 
+ // Basic reco objects (fill only when they exist)
+ double t_met_pt = -99.0, t_met_phi = -99.0;
+ 
+ int    t_nlep = 0, t_njet = 0, t_nb = 0, t_ndb = 0;
+ 
+ // Leptons (leading/subleading)
+ double t_lep1_pt=-99, t_lep1_eta=-99, t_lep1_phi=-99;
+ double t_lep2_pt=-99, t_lep2_eta=-99, t_lep2_phi=-99;
+ int    t_lep1_charge=0, t_lep2_charge=0;
+ int    t_lep1_flav=-1,  t_lep2_flav=-1; // 0=e, 1=mu
+ 
+ // Higgs candidate from double-b jets
+ double t_hbb_m=-99, t_hbb_pt=-99, t_hbb_eta=-99, t_hbb_phi=-99;
+ double t_dbj1_pt=-99, t_dbj1_eta=-99, t_dbj1_phi=-99, t_dbj1_m=-99;
+ double t_dbj2_pt=-99, t_dbj2_eta=-99, t_dbj2_phi=-99, t_dbj2_m=-99;
+ double t_dR_dbj12=-99, t_dM_dbj12=-99;
+ 
+ // Useful derived quantities
+ double t_mll=-99, t_dRll=-99, t_HT=-99;
+ 
+ // Branches
+ outTree->Branch("event",   &t_event,  "event/L");
+ outTree->Branch("weight",  &t_weight, "weight/D");
+ 
+ outTree->Branch("met_pt",  &t_met_pt,  "met_pt/D");
+ outTree->Branch("met_phi", &t_met_phi, "met_phi/D");
+ 
+ outTree->Branch("nlep", &t_nlep, "nlep/I");
+ outTree->Branch("njet", &t_njet, "njet/I");
+ outTree->Branch("nb",   &t_nb,   "nb/I");
+ outTree->Branch("ndb",  &t_ndb,  "ndb/I");
+ 
+ outTree->Branch("lep1_pt",     &t_lep1_pt,     "lep1_pt/D");
+ outTree->Branch("lep1_eta",    &t_lep1_eta,    "lep1_eta/D");
+ outTree->Branch("lep1_phi",    &t_lep1_phi,    "lep1_phi/D");
+ outTree->Branch("lep1_charge", &t_lep1_charge, "lep1_charge/I");
+ outTree->Branch("lep1_flav",   &t_lep1_flav,   "lep1_flav/I");
+ 
+ outTree->Branch("lep2_pt",     &t_lep2_pt,     "lep2_pt/D");
+ outTree->Branch("lep2_eta",    &t_lep2_eta,    "lep2_eta/D");
+ outTree->Branch("lep2_phi",    &t_lep2_phi,    "lep2_phi/D");
+ outTree->Branch("lep2_charge", &t_lep2_charge, "lep2_charge/I");
+ outTree->Branch("lep2_flav",   &t_lep2_flav,   "lep2_flav/I");
 
-  //
-  //  wgt_prime: use for RAW histograms      (weight = 1)
-  //  wgt      : physics per-event weight    (Nexp / Nstat)
-  //
-  //  Inside the RECO loop we use:
-  //      const double weight = wgt_prime;
-  //
-  //  To switch to WEIGHTED histograms:
-  //      const double weight = wgt;
-  //
-  // ------------------------------------------------------------------------
-  float wgt_prime = 1.0f;
-  float wgt       = 1.0f;   // will be set to Nexp/Nstat
-  float sigma_pb  = 0.0f;   // cross section in pb
-  const float L_int   = 108.96f;   // fb^-1
-  const float Br_Wlnu = 0.1086f;   // BR(W->lnu) per lepton flavour (used only for signal)
+ outTree->Branch("hbb_m",   &t_hbb_m,   "hbb_m/D");
+ outTree->Branch("hbb_pt",  &t_hbb_pt,  "hbb_pt/D");
+ outTree->Branch("hbb_eta", &t_hbb_eta, "hbb_eta/D");
+ outTree->Branch("hbb_phi", &t_hbb_phi, "hbb_phi/D");
+ 
+ outTree->Branch("dbj1_pt",  &t_dbj1_pt,  "dbj1_pt/D");
+ outTree->Branch("dbj1_eta", &t_dbj1_eta, "dbj1_eta/D");
+ outTree->Branch("dbj1_phi", &t_dbj1_phi, "dbj1_phi/D");
+ outTree->Branch("dbj1_m",   &t_dbj1_m,   "dbj1_m/D");
+ 
+ outTree->Branch("dbj2_pt",  &t_dbj2_pt,  "dbj2_pt/D");
+ outTree->Branch("dbj2_eta", &t_dbj2_eta, "dbj2_eta/D");
+ outTree->Branch("dbj2_phi", &t_dbj2_phi, "dbj2_phi/D");
+ outTree->Branch("dbj2_m",   &t_dbj2_m,   "dbj2_m/D");
+ 
+ outTree->Branch("dR_dbj12", &t_dR_dbj12, "dR_dbj12/D");
+ outTree->Branch("dM_dbj12", &t_dM_dbj12, "dM_dbj12/D");
+ 
+ outTree->Branch("mll",  &t_mll,  "mll/D");
+ outTree->Branch("dRll", &t_dRll, "dRll/D");
+ outTree->Branch("HT",   &t_HT,   "HT/D");
+
+ //
+ //  wgt_prime: use for RAW histograms      (weight = 1)
+ //  wgt      : physics per-event weight    (Nexp / Nstat)
+ //
+ //  Inside the RECO loop we use:
+ //      const double weight = wgt_prime;
+ //
+ //  To switch to WEIGHTED histograms:
+ //      const double weight = wgt;
+ //
+ // ------------------------------------------------------------------------
+ float wgt_prime = 1.0f;
+ float wgt       = 1.0f;   // will be set to Nexp/Nstat
+ float sigma_pb  = 0.0f;   // cross section in pb
+ const float L_int   = 108.96f;   // fb^-1
+ const float Br_Wlnu = 0.1086f;   // BR(W->lnu) per lepton flavour (used only for signal)
+ const float Br_Hbb = 0.582f;    // BR(H->bb) at mH=125 GeV (use your chosen value)
 
   // Assign cross-section depending on sample
   if (isSignal) {
@@ -162,18 +271,34 @@ void MyClass::Loop() {
   } else if (isDYee || isDYmumu) {
     sigma_pb = 1822.3333f; // DY->2e or DY->2mu (your provided xsec)
   }
+  else if (isTTH_Hbb) {
+    sigma_pb = 0.329;
+  }
+  else if (isVBF_Hbb) {
+    sigma_pb = 2.372;
+  }
+  else if (isGGH_Hbb) {
+    sigma_pb = 30.363;
+  }
 
   // Convert pb → fb
   const float sigma_fb = sigma_pb * 1000.0f;
-
+  
   // Expected events
   float sigma = sigma_fb;
+  
+  // Signal: keep your existing BR(W->lnu)^2 factor
   if (isSignal) {
-    // For signal apply BR(W->lnu)^2
     sigma *= (Br_Wlnu * Br_Wlnu);
   }
+  
+  // H->bb backgrounds: multiply by BR(H->bb)
+  if (isTTH_Hbb || isVBF_Hbb || isGGH_Hbb) {
+    sigma *= Br_Hbb;
+  }
+  
+  float Nexp  = sigma * L_int;
 
-  float Nexp  = sigma * L_int;                     // expected events
   float Nstat = static_cast<float>(nentries);      // MC statistics
 
   // Correct per-event event weight:
@@ -394,7 +519,7 @@ void MyClass::Loop() {
   TH1F *h_bj2_eta_final = new TH1F( "h_bj2_eta_final", "Subleading b-jet #eta (final); #eta; Entries", 60, -2.5, 2.5 );
 
   // Δm = | m(bj1) - m(bj2) |
-  TH1F *h_dM_bj12 = new TH1F( "h_dM_bj12_final", "|m_{b1} - m_{b2}| (final); #Delta m [GeV]; Entries", 80, 0, 200 );
+    TH1F *h_dM_bj12 = new TH1F( "h_dM_bj12_final", "|m_{b1} - m_{b2}| (final); #Delta m [GeV]; Entries", 80, 0, 200 );
 
   // ==========================================================
   // NEW REAL-ANALYSIS HISTOGRAMS (after full selection)
@@ -417,8 +542,8 @@ void MyClass::Loop() {
   Long64_t nCut1 = 0; // N leptons >= 2
   Long64_t nCut2 = 0; // OS lepton pair
   Long64_t nCut3 = 0; // N jets >= 4 (using CLEAN jets)
-  Long64_t nCut4 = 0;  // N double-b-jets >= 1 
-  Long64_t nCut5 = 0; // N b-jets >= 3
+  Long64_t nCut4 = 0;  // N double-b-jets >= 2 
+  Long64_t nCut5 = 0; // N b-jets >= 1
   Long64_t nCut6 = 0; // MET >= 40
   Long64_t nCut7 = 0; // |mH - 125| < 50
   Long64_t nCut8 = 0; // |mll - 70| > 20
@@ -890,13 +1015,13 @@ void MyClass::Loop() {
 
     const int Njets = vec_cjet.size();
 
-    bool os_flavour_ok = false;
+    //bool os_flavour_ok = false;
     RecoLepton &l1 = leptons[0];
     RecoLepton &l2 = leptons[1];
 
-    if (l1.charge * l2.charge < 0) os_flavour_ok = true;
-    if (!os_flavour_ok) continue;
-    ++nCut2;
+    // if (l1.charge * l2.charge < 0) os_flavour_ok = true;
+    // if (!os_flavour_ok) continue;
+    //++nCut2;
 
     if (Njets < 4) continue;
     ++nCut3;
@@ -904,7 +1029,7 @@ void MyClass::Loop() {
     if (Ndoubleb < 2) continue;
     ++nCut4;
     
-    if (Nbjets < 2) continue;
+    if (Nbjets < 1) continue;
     ++nCut5;
 
     if (PuppiMET_pt < 40.0) continue;
@@ -939,7 +1064,7 @@ void MyClass::Loop() {
     h_dbj2_mass->Fill(db2.M(), weight);
 
     // Δm(double-b, double-b)
-    const double dM_dbj = std::fabs(db1.M() - db2.M());
+     const double dM_dbj = std::fabs(db1.M() - db2.M());
     h_dM_bj12->Fill(dM_dbj, weight);
 
     h_dbj1_pt ->Fill(db1.Pt(),  weight);
@@ -965,20 +1090,61 @@ void MyClass::Loop() {
     h_lep2_eta->Fill(l2.p4.Eta(), weight);
     h_lep2_phi->Fill(l2.p4.Phi(), weight);
 
+    // Always safe if Nbjets >= 1
     const TLorentzVector &bj1 = vec_bjets[0];
-    const TLorentzVector &bj2 = vec_bjets[1];
-
     h_bj1_pt_final ->Fill(bj1.Pt(),  weight);
     h_bj1_eta_final->Fill(bj1.Eta(), weight);
 
-    h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
-    h_bj2_eta_final->Fill(bj2.Eta(), weight);
+    // Only if a 2nd b-jet exists
+    if (vec_bjets.size() >= 2) {
+      const TLorentzVector &bj2 = vec_bjets[1];
+      h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
+      h_bj2_eta_final->Fill(bj2.Eta(), weight);
+    }
 
     h_mll ->Fill(ll.M(), weight);
     h_dRll->Fill(l1.p4.DeltaR(l2.p4), weight);
-
+    // Fill tree only for events that pass final selection
+    t_event  = jentry;
+    t_weight = weight;          // currently wgt_prime; if you switch to wgt later, keep it consistent
+    
+    t_met_pt  = PuppiMET_pt;
+    t_met_phi = PuppiMET_phi;
+    
+ t_nlep = leptons.size();
+ t_njet = vec_cjet.size();
+ t_nb   = vec_bjets.size();
+ t_ndb  = vec_doublebjets.size();
+ 
+ // leptons
+ t_lep1_pt = l1.p4.Pt();  t_lep1_eta = l1.p4.Eta();  t_lep1_phi = l1.p4.Phi();
+ t_lep2_pt = l2.p4.Pt();  t_lep2_eta = l2.p4.Eta();  t_lep2_phi = l2.p4.Phi();
+t_lep1_charge = l1.charge;  t_lep2_charge = l2.charge;
+ t_lep1_flav   = l1.flavour; t_lep2_flav   = l2.flavour;
+ 
+ // double-b jets and Higgs
+ t_dbj1_pt = db1.Pt(); t_dbj1_eta = db1.Eta(); t_dbj1_phi = db1.Phi(); t_dbj1_m = db1.M();
+ t_dbj2_pt = db2.Pt(); t_dbj2_eta = db2.Eta(); t_dbj2_phi = db2.Phi(); t_dbj2_m = db2.M();
+ 
+ t_hbb_m   = HiggsCand.M();
+ t_hbb_pt  = HiggsCand.Pt();
+ t_hbb_eta = HiggsCand.Eta();
+ t_hbb_phi = HiggsCand.Phi();
+ 
+ t_dR_dbj12 = db1.DeltaR(db2);
+ t_dM_dbj12 = std::fabs(db1.M() - db2.M());
+ 
+ // dilepton
+ t_mll  = ll.M();
+ t_dRll = l1.p4.DeltaR(l2.p4);
+ 
+ // HT (you already computed it)
+ t_HT = HT;
+ 
+ outTree->Fill();
+ 
   } // end event loop
-// ======================= PART 3/3 =======================
+  // ======================= PART 3/3 =======================
   // ========================================================================
   // 3. EVENT YIELD CALCULATION & WEIGHT (RECO ONLY)
   // ========================================================================
@@ -992,7 +1158,11 @@ void MyClass::Loop() {
   std::cout << " EXPECTED EVENT YIELDS (RECO) \n";
   std::cout << "=============================================================\n";
   std::cout << " sigma(sample) = " << sigma_pb << " pb\n";
+  if (isSignal) {
   std::cout << " BR(W->lnu)^2 = " << fmt3(Br_Wlnu * Br_Wlnu) << "\n";
+} else {
+  std::cout << " BR(W->lnu)^2 = 1.000 (not applied)\n";
+}
   std::cout << " L = " << L_int << " fb^-1\n";
   std::cout << " -------------------------------------------\n";
   std::cout << " Nexp = " << Nexp_int << " events\n";
@@ -1027,10 +1197,10 @@ void MyClass::Loop() {
             << std::setw(30) << formatYield(nCut1, w)
             << std::setw(15) << eff_decimal(nCut1) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair"
-            << std::setw(25) << formatRaw(nCut2)
-            << std::setw(30) << formatYield(nCut2, w)
-            << std::setw(15) << eff_decimal(nCut2) << std::endl;
+  // std::cout << std::left << std::setw(35) << "Step 2) OS lepton pair"
+  //          << std::setw(25) << formatRaw(nCut2)
+  //          << std::setw(30) << formatYield(nCut2, w)
+  //           << std::setw(15) << eff_decimal(nCut2) << std::endl;
 
   std::cout << std::left << std::setw(35) << "Step 3) Clean N jets >= 4"
             << std::setw(25) << formatRaw(nCut3)
@@ -1042,7 +1212,7 @@ void MyClass::Loop() {
             << std::setw(30) << formatYield(nCut4, w)
             << std::setw(15) << eff_decimal(nCut4) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 5) N b-jets >= 2"
+  std::cout << std::left << std::setw(35) << "Step 5) N b-jets >= 1"
             << std::setw(25) << formatRaw(nCut5)
             << std::setw(30) << formatYield(nCut5, w)
             << std::setw(15) << eff_decimal(nCut5) << std::endl;
@@ -1064,8 +1234,12 @@ void MyClass::Loop() {
 
   std::cout << "=============================================================\n";
 
-  out->Write();
+  out->cd();
+  outTree->Write();   // explicit write of the tree
+  out->Write();       // write histograms + everything in the file
   out->Close();
-
-  std::cout << "Analysis complete. Histograms saved to " << outFileName << std::endl;
+  
+  std::cout << "Analysis complete. Histograms + tree saved to " << outFileName << std::endl;
+  
+  
 }
