@@ -116,6 +116,15 @@ void MyClass::Loop() {
   Bool_t isVBF_Hbb = false;
   Bool_t isGGH_Hbb = false;
   Bool_t isTTH_Hbb = false;
+  Bool_t isWW = false;
+  Bool_t isWZ = false;
+  Bool_t isZZ = false;
+  Bool_t isTbarWplusTo4Q    = false;
+  Bool_t isTTtoLNu2Q        = false;
+  Bool_t isTBbarQtoLNu      = false;
+  Bool_t isTBbarQto2Q       = false;
+  Bool_t isTbarWplusToNu2Q  = false;
+ 
   std::string signalTag = "";  // will hold e.g. "tth12gev", "tth25gev", "tth60gev"
 
   TFile *currentFile = fChain->GetCurrentFile();
@@ -153,38 +162,72 @@ else if (f.find("glugluhtobb") != std::string::npos) {
  else if (f.find("tthhtobb") != std::string::npos || (f.find("tth") != std::string::npos && f.find("htobb") != std::string::npos)) {
    isTTH_Hbb = true;
  }
- // ------------------------------------------------------------------------
- // Output file name
- // ------------------------------------------------------------------------
+  // Dibosons (exact filenames)
+ else if (f.find("ww.root") != std::string::npos) {
+   isWW = true;
+ }
+ else if (f.find("wz.root") != std::string::npos) {
+   isWZ = true;
+ }
+ else if (f.find("zz.root") != std::string::npos) {
+   isZZ = true;
+ }
+  // Single-top / tW-like samples (match exact-ish file tokens)
+ else if (f.find("tbbarqtolnu") != std::string::npos) {
+   isTBbarQtoLNu = true;
+ }
+ else if (f.find("tbbarqto2q") != std::string::npos) {
+   isTBbarQto2Q = true;
+ }
+ else if (f.find("tttolnu2q") != std::string::npos) {
+   isTTtoLNu2Q = true;
+ }
+ else if (f.find("tbarwplustonu2q") != std::string::npos) {
+   isTbarWplusToNu2Q = true;
+ }
+ else if (f.find("tbarwplusto4q") != std::string::npos) {
+   isTbarWplusTo4Q = true;
+ }
+  
+  // ------------------------------------------------------------------------
+  // Output file name
+  // ------------------------------------------------------------------------
   std::string outFileName = "output_unknown.root";
   if (isSignal) {
     outFileName = "output_signal_" + signalTag + ".root";  // e.g. output_signal_tth60gev.root
   }
-  else if (isTTbar)  outFileName = "output_ttbar.root";
   else if (isTTbar)  outFileName = "output_ttbar.root";
   else if (isDYee)   outFileName = "output_DYee.root";
   else if (isDYmumu) outFileName = "output_DYmumu.root";
   else if (isTTH_Hbb)  outFileName = "output_TTH_Hbb.root";
   else if (isVBF_Hbb)  outFileName = "output_VBF_Hbb.root";
   else if (isGGH_Hbb)  outFileName = "output_GGH_Hbb.root";
- // =======================================================
- // Output ROOT file for histograms
- // =======================================================
- TFile *out = new TFile(outFileName.c_str(), "RECREATE");
- out->cd(); // make sure histograms go here
- TTree *outTree = new TTree("AnalysisTree", "Reduced analysis tree");
- outTree->SetDirectory(out);   // tree is owned by the SAME file as histograms
-
- // Event-level
- Long64_t t_event = 0;
- double   t_weight = 1.0;
+  else if (isWW)    outFileName = "output_WW.root";
+  else if (isWZ)    outFileName = "output_WZ.root";
+  else if (isZZ)    outFileName = "output_ZZ.root";
+  else if (isTBbarQtoLNu)     outFileName = "output_TBbarQtoLNu.root";
+  else if (isTBbarQto2Q)      outFileName = "output_TBbarQto2Q.root";
+  else if (isTTtoLNu2Q)       outFileName = "output_TTtoLNu2Q.root";
+  else if (isTbarWplusToNu2Q) outFileName = "output_TbarWplusToNu2Q.root";
+  else if (isTbarWplusTo4Q)   outFileName = "output_TbarWplusTo4Q.root";
+  // =======================================================
+  // Output ROOT file for histograms
+  // =======================================================
+  TFile *out = new TFile(outFileName.c_str(), "RECREATE");
+  out->cd(); // make sure histograms go here
+  TTree *outTree = new TTree("AnalysisTree", "Reduced analysis tree");
+  outTree->SetDirectory(out);   // tree is owned by the SAME file as histograms
  
- // Basic reco objects (fill only when they exist)
- double t_met_pt = -99.0, t_met_phi = -99.0;
- 
- int    t_nlep = 0, t_njet = 0, t_nb = 0, t_ndb = 0;
- 
- // Leptons (leading/subleading)
+  // Event-level
+  Long64_t t_event = 0;
+  double   t_weight = 1.0;
+  
+  // Basic reco objects (fill only when they exist)
+  double t_met_pt = -99.0, t_met_phi = -99.0;
+  
+  int    t_nlep = 0, t_njet = 0, t_nb = 0, t_ndb = 0;
+  
+  // Leptons (leading/subleading)
  double t_lep1_pt=-99, t_lep1_eta=-99, t_lep1_phi=-99;
  double t_lep2_pt=-99, t_lep2_eta=-99, t_lep2_phi=-99;
  int    t_lep1_charge=0, t_lep2_charge=0;
@@ -222,7 +265,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
  outTree->Branch("lep2_phi",    &t_lep2_phi,    "lep2_phi/D");
  outTree->Branch("lep2_charge", &t_lep2_charge, "lep2_charge/I");
  outTree->Branch("lep2_flav",   &t_lep2_flav,   "lep2_flav/I");
-
+ 
  outTree->Branch("hbb_m",   &t_hbb_m,   "hbb_m/D");
  outTree->Branch("hbb_pt",  &t_hbb_pt,  "hbb_pt/D");
  outTree->Branch("hbb_eta", &t_hbb_eta, "hbb_eta/D");
@@ -262,37 +305,61 @@ else if (f.find("glugluhtobb") != std::string::npos) {
  const float L_int   = 108.96f;   // fb^-1
  const float Br_Wlnu = 0.1086f;   // BR(W->lnu) per lepton flavour (used only for signal)
  const float Br_Hbb = 0.582f;    // BR(H->bb) at mH=125 GeV (use your chosen value)
-
-  // Assign cross-section depending on sample
-  if (isSignal) {
-    sigma_pb = 0.5071f;   // ttH(aa) signal
-  } else if (isTTbar) {
-    sigma_pb = 98.04f;    // ttbar background
-  } else if (isDYee || isDYmumu) {
-    sigma_pb = 1822.3333f; // DY->2e or DY->2mu (your provided xsec)
-  }
-  else if (isTTH_Hbb) {
+ 
+ // Assign cross-section depending on sample
+ if (isSignal) {
+   sigma_pb = 0.5071f;   // ttH(aa) signal
+ } else if (isTTbar) {
+   sigma_pb = 98.04f;    // ttbar background
+ } else if (isDYee || isDYmumu) {
+   sigma_pb = 1822.3333f; // DY->2e or DY->2mu (your provided xsec)
+ }
+ else if (isTTH_Hbb) {
     sigma_pb = 0.329;
-  }
-  else if (isVBF_Hbb) {
-    sigma_pb = 2.372;
-  }
-  else if (isGGH_Hbb) {
-    sigma_pb = 30.363;
-  }
-
-  // Convert pb → fb
-  const float sigma_fb = sigma_pb * 1000.0f;
+ }
+ else if (isVBF_Hbb) {
+   sigma_pb = 2.372;
+ }
+ else if (isGGH_Hbb) {
+   sigma_pb = 30.363;
+ }
+ else if (isWW) {
+   sigma_pb = 125.7f;
+ }
+ else if (isWZ) {
+   sigma_pb = 55.2f;
+ }
+ else if (isZZ) {
+   sigma_pb = 19.43f;
+ }
+ else if (isTBbarQtoLNu) {
+   sigma_pb = 47.241f;
+ }
+ else if (isTBbarQto2Q) {
+   sigma_pb = 97.759f;
+ }
+ else if (isTTtoLNu2Q) {
+   sigma_pb = 405.87f;
+ }
+ else if (isTbarWplusToNu2Q) {
+  sigma_pb = 18.473f;   
+ }
+ else if (isTbarWplusTo4Q) {
+   sigma_pb = 19.114f;
+ }
+ 
+ // Convert pb → fb
+ const float sigma_fb = sigma_pb * 1000.0f;
+ 
+ // Expected events
+ float sigma = sigma_fb;
   
-  // Expected events
-  float sigma = sigma_fb;
-  
-  // Signal: keep your existing BR(W->lnu)^2 factor
-  if (isSignal) {
+ // Signal: keep your existing BR(W->lnu)^2 factor
+ if (isSignal) {
     sigma *= (Br_Wlnu * Br_Wlnu);
-  }
-  
-  // H->bb backgrounds: multiply by BR(H->bb)
+ }
+ 
+ // H->bb backgrounds: multiply by BR(H->bb)
   if (isTTH_Hbb || isVBF_Hbb || isGGH_Hbb) {
     sigma *= Br_Hbb;
   }
@@ -300,17 +367,17 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   float Nexp  = sigma * L_int;
 
   float Nstat = static_cast<float>(nentries);      // MC statistics
-
+  
   // Correct per-event event weight:
   //   wgt = Nexp / Nstat
   if (Nstat > 0.0f)
     wgt = Nexp / Nstat;
   else
     wgt = 1.0f;
-
+  
   const long long Nexp_int = static_cast<long long>(std::llround(Nexp));
   const double w = static_cast<double>(wgt);       // alias to keep your printout using "w"
-
+  
   // ------------------------------------------------------------------------
   // 1. HISTOGRAM DEFINITIONS (RECO + GEN)
   // ------------------------------------------------------------------------
@@ -451,14 +518,14 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   TH1F *h_bj_pt [MAXBJET];
   TH1F *h_bj_eta[MAXBJET];
   TH1F *h_bj_phi[MAXBJET];
-
+  
   for (int i = 0; i < MAXBJET; ++i) {
     std::string idx = std::to_string(i + 1);
     h_bj_pt[i]  = new TH1F(("h_bj" + idx + "_pt" ).c_str(), ("b-jet " + idx + " p_{T}; p_{T} [GeV]; Entries").c_str(), 100, 0, 500);
     h_bj_eta[i] = new TH1F(("h_bj" + idx + "_eta").c_str(), ("b-jet " + idx + " #eta; #eta; Entries").c_str(), 50, -2.5, 2.5);
     h_bj_phi[i] = new TH1F(("h_bj" + idx + "_phi").c_str(), ("b-jet " + idx + " #phi; #phi; Entries").c_str(), 64, -3.2, 3.2);
   }
-
+  
   // --- NEW: DOUBLE-B-TAGGED JET HISTOGRAMS (RECO) ---
   TH1F *h_nDoubleB    = new TH1F("h_nDoubleB", "double-b jet multiplicity; N_{dbjets}; Entries", 10, 0, 10);
   TH1F *h_dbjet_pt    = new TH1F("h_dbjet_pt", "All double-b jets p_{T}; p_{T} [GeV]; Entries", 100, 0, 500);
@@ -468,14 +535,14 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   TH1F *h_dbj_pt [MAXDBJET];
   TH1F *h_dbj_eta[MAXDBJET];
   TH1F *h_dbj_phi[MAXDBJET];
-
+  
   for (int i = 0; i < MAXDBJET; ++i) {
     std::string idx = std::to_string(i + 1);
     h_dbj_pt[i]  = new TH1F(("h_dbj" + idx + "_pt" ).c_str(), ("double-b jet " + idx + " p_{T}; p_{T} [GeV]; Entries").c_str(), 100, 0, 500);
     h_dbj_eta[i] = new TH1F(("h_dbj" + idx + "_eta").c_str(), ("double-b jet " + idx + " #eta; #eta; Entries").c_str(), 50, -2.5, 2.5);
     h_dbj_phi[i] = new TH1F(("h_dbj" + idx + "_phi").c_str(), ("double-b jet " + idx + " #phi; #phi; Entries").c_str(), 64, -3.2, 3.2);
   }
-
+  
   TH1F *h_e_pt_rank [MAXELE];
   TH1F *h_e_eta_rank[MAXELE];
   TH1F *h_e_phi_rank[MAXELE];
@@ -546,7 +613,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   Long64_t nCut5 = 0; // N b-jets >= 1
   Long64_t nCut6 = 0; // MET >= 40
   Long64_t nCut7 = 0; // |mH - 125| < 50
-  Long64_t nCut8 = 0; // |mll - 70| > 20
+  Long64_t nCut8 = 0; // |mll - 90| > 20
 
   // Helper for sorting GEN particles by pT
   auto sortParticles = [&](std::vector<int> &indices) {
@@ -554,7 +621,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
       return GenPart_pt[i] > GenPart_pt[j];
     });
   };
-
+  
   // Struct to unify electrons/muons into a single lepton container
   struct RecoLepton {
     TLorentzVector p4;
@@ -569,7 +636,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     Long64_t ientry = LoadTree(jentry);
     if (ientry < 0) break;
     fChain->GetEntry(jentry);
-
+    
     // Run GENERATOR LEVEL analysis , ONLY IF input file is the Signal:
     if (isSignal) {
       // ------------------------------------------------------------------
@@ -577,7 +644,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
       // ------------------------------------------------------------------
       std::vector<int> final_tops;
       std::vector<int> final_higgs;
-
+      
       int t1 = -1;
       int t2 = -1;
 
@@ -695,7 +762,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
           h_b4_from_a_phi->Fill(GenPart_phi[all_b_from_a[3]]);
         }
       }
-
+      
       auto processTop = [&](int idx, int rank) {
         if (rank == 1) {
           h_t1_pt ->Fill(GenPart_pt[idx]);
@@ -708,7 +775,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
           h_t2_phi ->Fill(GenPart_phi[idx]);
           h_t2_mass->Fill(GenPart_mass[idx]);
         }
-
+	
         int final_top = idx;
         bool search = true;
         while (search) {
@@ -721,7 +788,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
             }
           }
         }
-
+	
         int b_idx = -1;
         int w_idx = -1;
         for (int j = 0; j < nGenPart; ++j) {
@@ -729,7 +796,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
           if (std::abs(GenPart_pdgId[j]) == 5)  b_idx = j;
           if (std::abs(GenPart_pdgId[j]) == 24) w_idx = j;
         }
-
+	
         if (b_idx != -1) {
           if (rank == 1) {
             h_b1_top_pt ->Fill(GenPart_pt[b_idx]);
@@ -1119,7 +1186,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
  // leptons
  t_lep1_pt = l1.p4.Pt();  t_lep1_eta = l1.p4.Eta();  t_lep1_phi = l1.p4.Phi();
  t_lep2_pt = l2.p4.Pt();  t_lep2_eta = l2.p4.Eta();  t_lep2_phi = l2.p4.Phi();
-t_lep1_charge = l1.charge;  t_lep2_charge = l2.charge;
+ t_lep1_charge = l1.charge;  t_lep2_charge = l2.charge;
  t_lep1_flav   = l1.flavour; t_lep2_flav   = l2.flavour;
  
  // double-b jets and Higgs

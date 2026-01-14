@@ -10,7 +10,16 @@ enum SampleType {
   kDYmumu,
   kVBF_Hbb,
   kGGH_Hbb,
-  kTTH_Hbb
+  kTTH_Hbb,
+  kWW,
+  kWZ,
+  kZZ,
+  // NEW single-top / tt semi-leptonic / tW-like
+  kTBbarQtoLNu,
+  kTBbarQto2Q,
+  kTTtoLNu2Q,
+  kTbarWplustoNu2Q,
+  kTbarWplusto4Q
 };
 
 void runAnalysis(SampleType sample = kSignal12)
@@ -33,7 +42,7 @@ void runAnalysis(SampleType sample = kSignal12)
       std::cout << "Running on SIGNAL m=60: " << infile << std::endl;
       break;
 
-    // ----- keep backgrounds exactly as you already have -----
+    // ----- backgrounds -----
     case kTTbar:
       infile = "TTto2L2Nu.root";
       std::cout << "Running on TTbar background: " << infile << std::endl;
@@ -64,6 +73,48 @@ void runAnalysis(SampleType sample = kSignal12)
       std::cout << "Running on ttH H→bb sample: " << infile << std::endl;
       break;
 
+    // ----- diboson backgrounds -----
+    case kWW:
+      infile = "WW.root";
+      std::cout << "Running on WW background: " << infile << std::endl;
+      break;
+
+    case kWZ:
+      infile = "WZ.root";
+      std::cout << "Running on WZ background: " << infile << std::endl;
+      break;
+
+    case kZZ:
+      infile = "ZZ.root";
+      std::cout << "Running on ZZ background: " << infile << std::endl;
+      break;
+
+    // ----- NEW single-top / tt semi-leptonic / tW-like backgrounds -----
+    case kTBbarQtoLNu:
+      infile = "TBbarQtoLNu.root";
+      std::cout << "Running on TBbarQtoLNu background: " << infile << std::endl;
+      break;
+
+    case kTBbarQto2Q:
+      infile = "TBbarQto2Q.root";
+      std::cout << "Running on TBbarQto2Q background: " << infile << std::endl;
+      break;
+
+    case kTTtoLNu2Q:
+      infile = "TTtoLNu2Q.root";
+      std::cout << "Running on TTtoLNu2Q background: " << infile << std::endl;
+      break;
+
+    case kTbarWplustoNu2Q:
+      infile = "TbarWplustoNu2Q.root";
+      std::cout << "Running on TbarWplustoNu2Q background: " << infile << std::endl;
+      break;
+
+    case kTbarWplusto4Q:
+      infile = "TbarWplusto4Q.root";
+      std::cout << "Running on TbarWplusto4Q background: " << infile << std::endl;
+      break;
+
     default:
       std::cerr << "ERROR: Unknown sample type!" << std::endl;
       return;
@@ -78,6 +129,7 @@ void runAnalysis(SampleType sample = kSignal12)
   TTree *tree = (TTree*)f->Get("Events");
   if (!tree) {
     std::cerr << "ERROR: Tree 'Events' not found in file!" << std::endl;
+    f->Close();
     return;
   }
 
@@ -85,4 +137,6 @@ void runAnalysis(SampleType sample = kSignal12)
   analysis.Loop();
 
   std::cout << "Analysis finished for file: " << infile << std::endl;
+
+  f->Close();
 }
