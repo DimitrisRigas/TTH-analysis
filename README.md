@@ -23,3 +23,5 @@ reconplot.C plots the recon diagrams
 8/1/2025 Though of a solution in my efforts to save the dileptonic case. Instead of doing boosted and getting 2 double b tagged jets im going do do a semi try where i have atleast 1 double b jet and atleast 3 bjets. Need to think of a way to select the correct b jet though for the reconstruction of Higgs variables because i have the same problem i had with mass 60.  I did atleast one double b jet and although i get more events i lose all of them on the cut of atleast 3 bjets. It could be that im on mass 12 and i have more fully boosted incidents. I will try now getting mass 25 Gev- I restored the dileptonic analysis and saved as a new name Myclass2.C
 
 9/1/2025 Tried going for a selection cut Nb>1. I x5 the signal and my bg survived. Ill upload the updated myClass2. I also removed the cut of opposite signs and the S/B is much better. Added new backgrounds For TTH->bb.
+
+10/1-14/1  Added all of the important backgrounds. Fixed the macro to run them automatically. All i need to do before the multivariant analysis is fix the memory leaks and the drawing macro to do super impose
