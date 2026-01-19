@@ -537,13 +537,13 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   TH1F *h_dbj_phi[MAXDBJET];
   
   for (int i = 0; i < MAXDBJET; ++i) {
-    std::string idx = std::to_string(i + 1);
-    h_dbj_pt[i]  = new TH1F(("h_dbj" + idx + "_pt" ).c_str(), ("double-b jet " + idx + " p_{T}; p_{T} [GeV]; Entries").c_str(), 100, 0, 500);
-    h_dbj_eta[i] = new TH1F(("h_dbj" + idx + "_eta").c_str(), ("double-b jet " + idx + " #eta; #eta; Entries").c_str(), 50, -2.5, 2.5);
-    h_dbj_phi[i] = new TH1F(("h_dbj" + idx + "_phi").c_str(), ("double-b jet " + idx + " #phi; #phi; Entries").c_str(), 64, -3.2, 3.2);
-  }
-  
-  TH1F *h_e_pt_rank [MAXELE];
+  std::string idx = std::to_string(i + 1);
+  h_dbj_pt[i]  = new TH1F(("h_dbj_rank" + idx + "_pt" ).c_str(), ("double-b jet " + idx + " p_{T}; p_{T} [GeV]; Entries").c_str(), 100, 0, 500);
+  h_dbj_eta[i] = new TH1F(("h_dbj_rank" + idx + "_eta").c_str(), ("double-b jet " + idx + " #eta; #eta; Entries").c_str(), 50, -2.5, 2.5);
+  h_dbj_phi[i] = new TH1F(("h_dbj_rank" + idx + "_phi").c_str(), ("double-b jet " + idx + " #phi; #phi; Entries").c_str(), 64, -3.2, 3.2);
+ }
+ 
+ TH1F *h_e_pt_rank [MAXELE];
   TH1F *h_e_eta_rank[MAXELE];
   TH1F *h_e_phi_rank[MAXELE];
 
