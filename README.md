@@ -25,3 +25,5 @@ reconplot.C plots the recon diagrams
 9/1/2025 Tried going for a selection cut Nb>1. I x5 the signal and my bg survived. Ill upload the updated myClass2. I also removed the cut of opposite signs and the S/B is much better. Added new backgrounds For TTH->bb.
 
 10/1-14/1  Added all of the important backgrounds. Fixed the macro to run them automatically. All i need to do before the multivariant analysis is fix the memory leaks and the drawing macro to do super impose
+
+19/1 Fixed the leaking memory error, Fixed the issue i had with the pointer names and i also made a new macro that superimposes signal/bkg
