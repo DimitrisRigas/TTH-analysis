@@ -610,10 +610,10 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   Long64_t nCut2 = 0; // OS lepton pair
   Long64_t nCut3 = 0; // N jets >= 4 (using CLEAN jets)
   Long64_t nCut4 = 0;  // N double-b-jets >= 2 
-  Long64_t nCut5 = 0; // N b-jets >= 1
+  // Long64_t nCut5 = 0; // N b-jets >= 1
   Long64_t nCut6 = 0; // MET >= 40
   Long64_t nCut7 = 0; // |mH - 125| < 50
-  Long64_t nCut8 = 0; // |mll - 90| > 20
+  // Long64_t nCut8 = 0; // |mll - 90| > 20
 
   // Helper for sorting GEN particles by pT
   auto sortParticles = [&](std::vector<int> &indices) {
@@ -1085,7 +1085,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     //bool os_flavour_ok = false;
     RecoLepton &l1 = leptons[0];
     RecoLepton &l2 = leptons[1];
-
+    TLorentzVector ll = l1.p4 + l2.p4;   // always define it, even if Z-veto cut is commented out
     // if (l1.charge * l2.charge < 0) os_flavour_ok = true;
     // if (!os_flavour_ok) continue;
     //++nCut2;
@@ -1096,8 +1096,8 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     if (Ndoubleb < 2) continue;
     ++nCut4;
     
-    if (Nbjets < 1) continue;
-    ++nCut5;
+    // if (Nbjets < 1) continue;
+    //++nCut5;
 
     if (PuppiMET_pt < 40.0) continue;
     ++nCut6;
@@ -1108,9 +1108,9 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     ++nCut7;
 
     // Step 8: |mll - 90| > 20
-    TLorentzVector ll = l1.p4 + l2.p4;
-    if (std::fabs(ll.M() - 90.0) <= 20.0) continue;
-    ++nCut8;
+    //  TLorentzVector ll = l1.p4 + l2.p4;
+    //if (std::fabs(ll.M() - 90.0) <= 20.0) continue;
+    //++nCut8;
 
     // =====================================================================
     // REAL ANALYSIS (FINAL SELECTION)
@@ -1157,18 +1157,19 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     h_lep2_eta->Fill(l2.p4.Eta(), weight);
     h_lep2_phi->Fill(l2.p4.Phi(), weight);
 
-    // Always safe if Nbjets >= 1
-    const TLorentzVector &bj1 = vec_bjets[0];
-    h_bj1_pt_final ->Fill(bj1.Pt(),  weight);
-    h_bj1_eta_final->Fill(bj1.Eta(), weight);
-
-    // Only if a 2nd b-jet exists
-    if (vec_bjets.size() >= 2) {
-      const TLorentzVector &bj2 = vec_bjets[1];
-      h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
-      h_bj2_eta_final->Fill(bj2.Eta(), weight);
+    // Safe b-jet filling (you commented out the Nbjets cut, so we must protect access)
+    if (vec_bjets.size() >= 1) {
+      const TLorentzVector &bj1 = vec_bjets[0];
+      h_bj1_pt_final ->Fill(bj1.Pt(),  weight);
+      h_bj1_eta_final->Fill(bj1.Eta(), weight);
     }
-
+    
+if (vec_bjets.size() >= 2) {
+  const TLorentzVector &bj2 = vec_bjets[1];
+  h_bj2_pt_final ->Fill(bj2.Pt(),  weight);
+  h_bj2_eta_final->Fill(bj2.Eta(), weight);
+ }
+ 
     h_mll ->Fill(ll.M(), weight);
     h_dRll->Fill(l1.p4.DeltaR(l2.p4), weight);
     // Fill tree only for events that pass final selection
@@ -1279,10 +1280,10 @@ else if (f.find("glugluhtobb") != std::string::npos) {
             << std::setw(30) << formatYield(nCut4, w)
             << std::setw(15) << eff_decimal(nCut4) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 5) N b-jets >= 1"
-            << std::setw(25) << formatRaw(nCut5)
-            << std::setw(30) << formatYield(nCut5, w)
-            << std::setw(15) << eff_decimal(nCut5) << std::endl;
+  //std::cout << std::left << std::setw(35) << "Step 5) N b-jets >= 1"
+  //        << std::setw(25) << formatRaw(nCut5)
+  //        << std::setw(30) << formatYield(nCut5, w)
+  //        << std::setw(15) << eff_decimal(nCut5) << std::endl;
 
   std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
             << std::setw(25) << formatRaw(nCut6)
@@ -1294,10 +1295,10 @@ else if (f.find("glugluhtobb") != std::string::npos) {
             << std::setw(30) << formatYield(nCut7, w)
             << std::setw(15) << eff_decimal(nCut7) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 8) |mll - 90| > 20"
-            << std::setw(25) << formatRaw(nCut8)
-            << std::setw(30) << formatYield(nCut8, w)
-            << std::setw(15) << eff_decimal(nCut8) << std::endl;
+  // std::cout << std::left << std::setw(35) << "Step 8) |mll - 90| > 20"
+  //        << std::setw(25) << formatRaw(nCut8)
+  //        << std::setw(30) << formatYield(nCut8, w)
+  //        << std::setw(15) << eff_decimal(nCut8) << std::endl;
 
   std::cout << "=============================================================\n";
 
