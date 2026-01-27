@@ -8,3 +8,10 @@ MY myplot.C draws the generator level histograms.
 My overlay_signal_keybkgs.C draws the superimposed signal vs background and  the overlay_signal_allbkgs.C draws the signal vs all the backgrounds shown and super imposed.
 
 My TMVAClassification.C is my neuronic multivariant trainer 
+
+My runAnalysis.C is the macro that is running my data(signals,backgrounds etc)
+
+Instructions on how to run each code is commented inside the code. 
+
+Typically you just run inside root as :
+
