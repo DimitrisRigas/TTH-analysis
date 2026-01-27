@@ -29,3 +29,5 @@ reconplot.C plots the recon diagrams
 19/1 Fixed the leaking memory error, Fixed the issue i had with the pointer names and i also made a new macro that superimposes signal/bkg
 
 23/1 Created the multivariant analysis. It works. I need more inputs. I also removed 2 cuts, 5 and 8. Turns out DY may survive . I will add the new data from the new production and decide whether the S/B sacrifice was worth it.
+
+27/1 Tried new data. They dont work. Something is wrong with them. I added backgrounds on reconplot. I fixed the overlay with all backgrounds. I rebin it and it also saves as pdf
