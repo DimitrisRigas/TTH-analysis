@@ -21,15 +21,35 @@ void reconplot(int mode = 1, int sample = 0, const char* signalTag = "tth12gev")
   std::string tag;
 
   if (sample == 0) {
-    // Multiple signal outputs, e.g. output_signal_tth12gev.root
     fname = std::string("output_signal_") + signalTag + ".root";
-    tag   = std::string("_signal_") + signalTag;  // used for canvas/png names + cache scoping
+    tag   = std::string("_signal_") + signalTag;
   }
-  else if (sample == 1) { fname = "output_ttbar.root";  tag = "_ttbar";  }
-  else if (sample == 2) { fname = "output_DYee.root";   tag = "_DYee";   }
+  else if (sample == 1) { fname = "output_ttbar.root";  tag = "_ttbar"; }
+  else if (sample == 2) { fname = "output_DYee.root";   tag = "_DYee"; }
   else if (sample == 3) { fname = "output_DYmumu.root"; tag = "_DYmumu"; }
+
+  // --- H->bb backgrounds ---
+  else if (sample == 4) { fname = "output_TTH_Hbb.root"; tag = "_TTH_Hbb"; }
+  else if (sample == 5) { fname = "output_VBF_Hbb.root"; tag = "_VBF_Hbb"; }
+  else if (sample == 6) { fname = "output_GGH_Hbb.root"; tag = "_GGH_Hbb"; }
+
+  // --- Dibosons ---
+  else if (sample == 7) { fname = "output_WW.root"; tag = "_WW"; }
+  else if (sample == 8) { fname = "output_WZ.root"; tag = "_WZ"; }
+  else if (sample == 9) { fname = "output_ZZ.root"; tag = "_ZZ"; }
+
+  // --- Single-top / related ---
+  else if (sample == 10) { fname = "output_TBbarQtoLNu.root";     tag = "_TBbarQtoLNu"; }
+  else if (sample == 11) { fname = "output_TBbarQto2Q.root";      tag = "_TBbarQto2Q"; }
+  else if (sample == 12) { fname = "output_TTtoLNu2Q.root";       tag = "_TTtoLNu2Q"; }
+  else if (sample == 13) { fname = "output_TbarWplusToNu2Q.root"; tag = "_TbarWplusToNu2Q"; }
+  else if (sample == 14) { fname = "output_TbarWplusTo4Q.root";   tag = "_TbarWplusTo4Q"; }
+
   else {
-    std::cout << "ERROR: Unknown sample code!" << std::endl;
+    std::cout << "ERROR: Unknown sample code: " << sample << std::endl;
+    std::cout << "Valid: 0=signal, 1=ttbar, 2=DYee, 3=DYmumu, 4=TTH_Hbb, 5=VBF_Hbb, 6=GGH_Hbb, "
+                 "7=WW, 8=WZ, 9=ZZ, 10=TBbarQtoLNu, 11=TBbarQto2Q, 12=TTtoLNu2Q, "
+                 "13=TbarWplusToNu2Q, 14=TbarWplusTo4Q\n";
     return;
   }
 

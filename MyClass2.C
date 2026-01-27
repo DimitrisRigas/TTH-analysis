@@ -865,7 +865,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     // ---------------------------------------------------------------------
     // 2A. RECO-LEVEL ANALYSIS
     // ---------------------------------------------------------------------
-    const double weight = static_cast<double>(wgt_prime);
+    const double weight = static_cast<double>(wgt);
 
     h_pre_MET_pt ->Fill(PuppiMET_pt,  weight);
     h_pre_MET_phi->Fill(PuppiMET_phi, weight);
@@ -947,6 +947,8 @@ else if (f.find("glugluhtobb") != std::string::npos) {
       }
     }
 
+    // std::cout << " Hello 1 " << std::endl;
+    
     auto cmpPt = [](const TLorentzVector &a, const TLorentzVector &b) {
       return a.Pt() > b.Pt();
     };
@@ -954,8 +956,19 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     std::sort(vec_ele.begin(), vec_ele.end(), cmpPt);
     std::sort(vec_muons.begin(), vec_muons.end(), cmpPt);
     std::sort(vec_cjet.begin(), vec_cjet.end(), cmpPt);
-    std::sort(vec_bjets.begin(), vec_bjets.end(), cmpPt);
-    std::sort(vec_doublebjets.begin(),vec_doublebjets.end(),cmpPt);
+    // std::sort(vec_bjet();
+	      
+  
+
+    auto cmpPt2 = [](const TLorentzVector &a, const TLorentzVector &b) {
+      return a.Pt() > b.Pt();
+    };
+
+    std::sort(vec_ele.begin(), vec_ele.end(), cmpPt2);
+    std::sort(vec_muons.begin(), vec_muons.end(), cmpPt2);
+    std::sort(vec_cjet.begin(), vec_cjet.end(), cmpPt2);
+    std::sort(vec_bjets.begin(), vec_bjets.end(), cmpPt2);
+    std::sort(vec_doublebjets.begin(),vec_doublebjets.end(),cmpPt2);
 
     std::sort(leptons.begin(), leptons.end(), [](const RecoLepton &a, const RecoLepton &b) {
       return a.p4.Pt() > b.p4.Pt();

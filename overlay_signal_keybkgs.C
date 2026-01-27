@@ -216,8 +216,8 @@ void overlay_signal_keybkgs(int bkgCode = 2,
 
     const char* hnames[3] = {"h_Hdbb_mass", "h_Hdbb_pt", "h_Hdbb_eta"};
     for (int i = 0; i < 3; ++i) {
-      TH1* hs = CloneToROOT(fs, std::string("SIG_") + signalTag, hnames[i]);
-      TH1* hb = CloneToROOT(fb, std::string("BKG_") + bkgTag,   hnames[i]);
+      TH1* hs = CloneToROOT(fs, std::string("SIG_") + signalTag, hnames[i]);hs->Rebin(2);
+      TH1* hb = CloneToROOT(fb, std::string("BKG_") + bkgTag,   hnames[i]);hb->Rebin(2);
       if (!hs || !hb) continue;
       DrawOverlayWithRatio(c->cd(i+1), hs, hb, sigLabel.c_str(), bkgLabel.c_str(), normalize);
     }
@@ -226,6 +226,7 @@ void overlay_signal_keybkgs(int bkgCode = 2,
     if (keepWindowsOpen) gCanvases.push_back(c);
     else delete c;
   }
+
 
   // =========================================
   // CANVAS 2: Double-b jet kinematics (8 pads)
