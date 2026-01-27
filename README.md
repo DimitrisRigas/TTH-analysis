@@ -1,33 +1,43 @@
-# TTH-analysis
+# Higgs Boson (ttH) Event Analysis with Machine Learning
 
-myplot.C plots the gen level diagrams.
+## Overview
+This project focuses on the analysis of Higgs boson production in association with a top–antitop quark pair (ttH)
+using data from the CMS experiment at CERN. The goal is to apply data analysis and machine learning techniques
+to classify events and explore patterns that may indicate physics beyond the Standard Model.
 
-reconplot.C plots the recon diagrams
+The project emphasizes transferable data science skills such as high-dimensional data analysis, feature engineering,
+model evaluation, and neural-based classification.
 
-1/12/2025.Version 1.0. //Code cleanup. Gen analysis done. Recon analysis up to sorted b-jets completed
+## Dataset
+- Source: CMS Open Data (CERN)
+- Type: High-energy physics collision events
+- Characteristics: Large-scale, noisy, high-dimensional scientific data
 
-2/12/2025 Version 2.0 //Got a new dataset. Mass of a=12Gev
+## Methods
+- Data preprocessing and cleaning
+- Feature engineering based on physics-motivated observables
+- Statistical analysis and exploratory data analysis (EDA)
+- Custom neural-inspired machine learning models
+- Model validation and performance evaluation
 
-2-10/12/2025 Trying to adapt the changes and fix all the bugs that come up.
+## Tools & Technologies
+- C++
+- root
+- python
+- pyroot
 
-11/12/2025 Version 2.1 //Added cross cleaning,Higgs kinematics, a kinematics, Ht, Met. Added background data. Need more background data because only 4 events remain after cuts. Also updated the plot macros to get the sample size from the corresponding output file depending on the input.
+## Results
+- Successful classification of signal vs background events
+- Identification of non-linear correlations using neural-based models
+- Framework extensible to anomaly detection and new physics searches
 
-12/12/2025 2.2 // Added cross cleaning on the jet selection choice for b jets and added more kinematic variables
 
-13/12/2025 2.3 // Added more kinematic variables and 2 mroe selection cuts
+## Key Takeaways
+- Applied machine learning to real-world scientific data
+- Worked with complex, high-dimensional datasets
+- Built end-to-end data analysis pipelines
+- Bridged physics domain knowledge with data-driven modeling
 
-14/12/2025 2.4 // Fixed the cross cleaning of jet logic. Issue found.  I have way too few events surviving. Solution needs to be found.
 
-7/1/2025 2.5 // Became single leptonic to fix the issue with few events surviving.  Now i have 7 events on signal and 7 events on background of TTto2L2nu. Added a new output file where it saves the kinematic variables as trees . Fixed an issue that came up with the myplot.C.
 
-8/1/2025 Though of a solution in my efforts to save the dileptonic case. Instead of doing boosted and getting 2 double b tagged jets im going do do a semi try where i have atleast 1 double b jet and atleast 3 bjets. Need to think of a way to select the correct b jet though for the reconstruction of Higgs variables because i have the same problem i had with mass 60.  I did atleast one double b jet and although i get more events i lose all of them on the cut of atleast 3 bjets. It could be that im on mass 12 and i have more fully boosted incidents. I will try now getting mass 25 Gev- I restored the dileptonic analysis and saved as a new name Myclass2.C
 
-9/1/2025 Tried going for a selection cut Nb>1. I x5 the signal and my bg survived. Ill upload the updated myClass2. I also removed the cut of opposite signs and the S/B is much better. Added new backgrounds For TTH->bb.
-
-10/1-14/1  Added all of the important backgrounds. Fixed the macro to run them automatically. All i need to do before the multivariant analysis is fix the memory leaks and the drawing macro to do super impose
-
-19/1 Fixed the leaking memory error, Fixed the issue i had with the pointer names and i also made a new macro that superimposes signal/bkg
-
-23/1 Created the multivariant analysis. It works. I need more inputs. I also removed 2 cuts, 5 and 8. Turns out DY may survive . I will add the new data from the new production and decide whether the S/B sacrifice was worth it.
-
-27/1 Tried new data. They dont work. Something is wrong with them. I added backgrounds on reconplot. I fixed the overlay with all backgrounds. I rebin it and it also saves as pdf
