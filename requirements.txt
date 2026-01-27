@@ -1,0 +1,6 @@
+### System Requirements
+- C++ (ROOT-compatible compiler)
+- ROOT (CERN)
+- PyROOT
+- Python 3.8+
+- Terminal and code editor of choice (e.g. VS Code)
