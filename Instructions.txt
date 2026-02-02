@@ -14,4 +14,7 @@ My runAnalysis.C is the macro that is running my data(signals,backgrounds etc)
 Instructions on how to run each code is commented inside the code. 
 
 Typically you just run inside root as :
-
+root -l
+.L MyClass2.C+
+.L runAnalysis.C
+runAnalysis(inputname)
