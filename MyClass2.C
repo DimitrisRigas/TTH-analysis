@@ -1,4 +1,3 @@
-
 #define MyClass_cxx
 #include "MyClass.h"
 #include <TH1F.h>
@@ -129,7 +128,27 @@ void MyClass::Loop() {
 
   TFile *currentFile = fChain->GetCurrentFile();
   std::string fname = currentFile ? std::string(currentFile->GetName()) : "";
-  
+  // ------------------------------------------------------------------------
+// MC statistics from input file histogram "nevents"
+// ------------------------------------------------------------------------
+float Nstat = 0.0f;
+
+if (!currentFile) {
+  std::cerr << "[ERROR] No current input file found!" << std::endl;
+} else {
+  TH1 *h_nevents = dynamic_cast<TH1*>(currentFile->Get("nevents"));
+
+  if (!h_nevents) {
+    std::cerr << "[ERROR] Histogram 'nevents' not found in input file!" << std::endl;
+  } else {
+    Nstat = h_nevents->GetBinContent(1);
+
+    if (Nstat <= 0.0f) {
+      std::cerr << "[ERROR] nevents bin 1 is zero or negative!" << std::endl;
+    }
+  }
+}
+
   // make lowercase copy for robust matching
   std::string f = fname;
   std::transform(f.begin(), f.end(), f.begin(),
@@ -308,11 +327,11 @@ else if (f.find("glugluhtobb") != std::string::npos) {
  
  // Assign cross-section depending on sample
  if (isSignal) {
-   sigma_pb = 0.5071f;   // ttH(aa) signal
+   sigma_pb = 0.5700f;   // ttH(aa) signal
  } else if (isTTbar) {
    sigma_pb = 98.04f;    // ttbar background
  } else if (isDYee || isDYmumu) {
-   sigma_pb = 1822.3333f; // DY->2e or DY->2mu (your provided xsec)
+   sigma_pb = 2115.3333; // DY->2e or DY->2mu (your provided xsec)
  }
  else if (isTTH_Hbb) {
     sigma_pb = 0.329;
@@ -366,7 +385,6 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   
   float Nexp  = sigma * L_int;
 
-  float Nstat = static_cast<float>(nentries);      // MC statistics
   
   // Correct per-event event weight:
   //   wgt = Nexp / Nstat
@@ -607,13 +625,13 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   // Cut-flow counters (for RECO only)
   // ------------------------------------------------------------------------
   Long64_t nCut1 = 0; // N leptons >= 2
-  Long64_t nCut2 = 0; // OS lepton pair
-  Long64_t nCut3 = 0; // N jets >= 4 (using CLEAN jets)
-  Long64_t nCut4 = 0;  // N double-b-jets >= 2 
+  //Long64_t nCut2 = 0; // OS lepton pair
+  Long64_t nCut2 = 0; // N jets >= 4 (using CLEAN jets)
+  Long64_t nCut3 = 0;  // N double-b-jets >= 2 
   // Long64_t nCut5 = 0; // N b-jets >= 1
-  Long64_t nCut6 = 0; // MET >= 40
-  Long64_t nCut7 = 0; // |mH - 125| < 50
-  // Long64_t nCut8 = 0; // |mll - 90| > 20
+  Long64_t nCut4 = 0; // MET >= 40
+  Long64_t nCut5 = 0; // |mH - 125| < 50
+   Long64_t nCut6 = 0; // |mll - 90| > 20
 
   // Helper for sorting GEN particles by pT
   auto sortParticles = [&](std::vector<int> &indices) {
@@ -867,45 +885,56 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     // ---------------------------------------------------------------------
     const double weight = static_cast<double>(wgt);
 
-    h_pre_MET_pt ->Fill(PuppiMET_pt,  weight);
-    h_pre_MET_phi->Fill(PuppiMET_phi, weight);
-
     std::vector<TLorentzVector> vec_ele;
     std::vector<TLorentzVector> vec_muons;
     std::vector<TLorentzVector> vec_cjet;
     std::vector<TLorentzVector> vec_bjets;
     std::vector<TLorentzVector> vec_doublebjets;
     std::vector<RecoLepton> leptons;
+// Choose ONE tight electron ID definition:
+const bool useTightElectronMVA = false; // true => WP80, false => cutBased>=3 + iso03<0.15
 
-    for (int i = 0; i < nElectron; ++i) {
-      TLorentzVector p4;
-      p4.SetPtEtaPhiM(Electron_pt[i], Electron_eta[i], Electron_phi[i], Electron_mass[i]);
-      if (p4.Pt() <= 20.0) continue;
-      if (std::fabs(p4.Eta()) >= 2.5) continue;
+for (int i = 0; i < nElectron; ++i) {
+  TLorentzVector p4;
+  p4.SetPtEtaPhiM(Electron_pt[i], Electron_eta[i], Electron_phi[i], Electron_mass[i]);
 
-      vec_ele.push_back(p4);
+  // Kinematics (loose)
+  if (p4.Pt() <= 15.0) continue;
+  if (std::fabs(p4.Eta()) >= 2.5) continue;
 
-      RecoLepton lep;
-      lep.p4 = p4;
-      lep.charge = Electron_charge[i];
-      lep.flavour = 0;
-      leptons.push_back(lep);
-    }
+  // Loose ID (your definition)
+  if (Electron_mvaIso_WP90[i] <= 0.5) continue;
 
-    for (int i = 0; i < nMuon; ++i) {
-      TLorentzVector p4;
-      p4.SetPtEtaPhiM(Muon_pt[i], Muon_eta[i], Muon_phi[i], Muon_mass[i]);
-      if (p4.Pt() <= 20.0) continue;
-      if (std::fabs(p4.Eta()) >= 2.5) continue;
+  vec_ele.push_back(p4);
 
-      vec_muons.push_back(p4);
+  RecoLepton lep;
+  lep.p4 = p4;
+  lep.charge = Electron_charge[i];
+  lep.flavour = 0;
+  leptons.push_back(lep);
+}
 
-      RecoLepton lep;
-      lep.p4 = p4;
-      lep.charge = Muon_charge[i];
-      lep.flavour = 1;
-      leptons.push_back(lep);
-    }
+for (int i = 0; i < nMuon; ++i) {
+  TLorentzVector p4;
+  p4.SetPtEtaPhiM(Muon_pt[i], Muon_eta[i], Muon_phi[i], Muon_mass[i]);
+
+  // Kinematics (loose)
+  if (p4.Pt() <= 10.0) continue;
+  if (std::fabs(p4.Eta()) >= 2.4) continue;
+
+  // Loose ID + isolation (your definition)
+  if (Muon_looseId[i] <= 0.5) continue;
+  if (Muon_pfRelIso04_all[i] >= 0.25) continue;
+
+  vec_muons.push_back(p4);
+
+  RecoLepton lep;
+  lep.p4 = p4;
+  lep.charge = Muon_charge[i];
+  lep.flavour = 1;
+  leptons.push_back(lep);
+}
+
 
     // ====================================================================
     // JET CONSTRUCTION WITH PROPER CROSS CLEANING
@@ -940,14 +969,14 @@ else if (f.find("glugluhtobb") != std::string::npos) {
       // h_singleb->Fill();
       
       // Tag clean jet
-      if (Jet_btagUParTAK4probbb[i] > 0.12f) {
+      if (Jet_btagUParTAK4probbb[i] > 0.06f) {
         vec_doublebjets.push_back(j);
       } else if (Jet_btagUParTAK4B[i] > 0.4648f) {
         vec_bjets.push_back(j);
       }
     }
 
-    // std::cout << " Hello 1 " << std::endl;
+
     
     auto cmpPt = [](const TLorentzVector &a, const TLorentzVector &b) {
       return a.Pt() > b.Pt();
@@ -1104,26 +1133,28 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     //++nCut2;
 
     if (Njets < 4) continue;
-    ++nCut3;
+    ++nCut2;
     
     if (Ndoubleb < 2) continue;
-    ++nCut4;
+    ++nCut3;
     
     // if (Nbjets < 1) continue;
     //++nCut5;
+    h_pre_MET_pt ->Fill(PuppiMET_pt,  weight);
+    h_pre_MET_phi->Fill(PuppiMET_phi, weight);
 
-    if (PuppiMET_pt < 40.0) continue;
-    ++nCut6;
+    if (PuppiMET_pt < 20.0) continue;
+    ++nCut4;
 
     // Step 7: |mH - 125| < 50
     const double mH_tmp = (vec_doublebjets[0] + vec_doublebjets[1]).M();
     if (std::fabs(mH_tmp - 125.0) >= 50.0) continue;
-    ++nCut7;
+    ++nCut5;
 
     // Step 8: |mll - 90| > 20
-    //  TLorentzVector ll = l1.p4 + l2.p4;
-    //if (std::fabs(ll.M() - 90.0) <= 20.0) continue;
-    //++nCut8;
+    // TLorentzVector ll = l1.p4 + l2.p4;
+    if (std::fabs(ll.M() - 90.0) <= 20.0) continue;
+    ++nCut6;
 
     // =====================================================================
     // REAL ANALYSIS (FINAL SELECTION)
@@ -1251,13 +1282,13 @@ if (vec_bjets.size() >= 2) {
   std::cout << " per-event weight w = Nexp/Nstat = " << fmt3(w) << "\n";
   std::cout << "=============================================================\n\n";
 
-  auto eff_decimal = [&](Long64_t n) {
-    if (nentries == 0) return std::string("0.000");
-    const double e = static_cast<double>(n) / static_cast<double>(nentries);
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%.3f", e);
-    return std::string(buf);
-  };
+auto eff_decimal = [&](Long64_t n) {
+  if (Nstat <= 0.0f) return std::string("0.000");
+  const double e = static_cast<double>(n) / static_cast<double>(Nstat);
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "%.3f", e);
+  return std::string(buf);
+};
 
   std::cout << "=============================================================\n";
   std::cout << " CUT FLOW TABLE (RECO) \n";
@@ -1268,10 +1299,11 @@ if (vec_bjets.size() >= 2) {
             << std::setw(15) << "Eff" << std::endl;
   std::cout << "-------------------------------------------------------------\n";
 
-  std::cout << std::left << std::setw(35) << "Step 0) Raw events"
-            << std::setw(25) << formatRaw(nentries)
-            << std::setw(30) << formatYield(nentries, w)
-            << std::setw(15) << "1.000" << std::endl;
+std::cout << std::left << std::setw(35) << "Step 0) Raw events"
+          << std::setw(25) << formatRaw(nentries)
+          << std::setw(30) << formatYield(nentries, w)
+          << std::setw(15) << "1.000" << std::endl;
+;
 
   std::cout << std::left << std::setw(35) << "Step 1) N leptons >= 2"
             << std::setw(25) << formatRaw(nCut1)
@@ -1283,35 +1315,35 @@ if (vec_bjets.size() >= 2) {
   //          << std::setw(30) << formatYield(nCut2, w)
   //           << std::setw(15) << eff_decimal(nCut2) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 3) Clean N jets >= 4"
+  std::cout << std::left << std::setw(35) << "Step 2) Clean N jets >= 4"
+            << std::setw(25) << formatRaw(nCut2)
+            << std::setw(30) << formatYield(nCut2, w)
+            << std::setw(15) << eff_decimal(nCut2) << std::endl;
+
+  std::cout << std::left << std::setw(35) << "Step 3) N double-b-jets >= 2"
             << std::setw(25) << formatRaw(nCut3)
             << std::setw(30) << formatYield(nCut3, w)
             << std::setw(15) << eff_decimal(nCut3) << std::endl;
-
-  std::cout << std::left << std::setw(35) << "Step 4) N double-b-jets >= 2"
-            << std::setw(25) << formatRaw(nCut4)
-            << std::setw(30) << formatYield(nCut4, w)
-            << std::setw(15) << eff_decimal(nCut4) << std::endl;
 
   //std::cout << std::left << std::setw(35) << "Step 5) N b-jets >= 1"
   //        << std::setw(25) << formatRaw(nCut5)
   //        << std::setw(30) << formatYield(nCut5, w)
   //        << std::setw(15) << eff_decimal(nCut5) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 6) MET >= 40 GeV"
-            << std::setw(25) << formatRaw(nCut6)
-            << std::setw(30) << formatYield(nCut6, w)
-            << std::setw(15) << eff_decimal(nCut6) << std::endl;
+  std::cout << std::left << std::setw(35) << "Step 4) MET >= 20 GeV"
+            << std::setw(25) << formatRaw(nCut4)
+            << std::setw(30) << formatYield(nCut4, w)
+            << std::setw(15) << eff_decimal(nCut4) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 7) |mH - 125| < 50"
-            << std::setw(25) << formatRaw(nCut7)
-            << std::setw(30) << formatYield(nCut7, w)
-            << std::setw(15) << eff_decimal(nCut7) << std::endl;
+  std::cout << std::left << std::setw(35) << "Step 5) |mH - 125| < 50"
+            << std::setw(25) << formatRaw(nCut5)
+            << std::setw(30) << formatYield(nCut5, w)
+            << std::setw(15) << eff_decimal(nCut5) << std::endl;
 
-  // std::cout << std::left << std::setw(35) << "Step 8) |mll - 90| > 20"
-  //        << std::setw(25) << formatRaw(nCut8)
-  //        << std::setw(30) << formatYield(nCut8, w)
-  //        << std::setw(15) << eff_decimal(nCut8) << std::endl;
+   std::cout << std::left << std::setw(35) << "Step 6) |mll - 90| > 20"
+          << std::setw(25) << formatRaw(nCut6)
+          << std::setw(30) << formatYield(nCut6, w)
+          << std::setw(15) << eff_decimal(nCut6) << std::endl;
 
   std::cout << "=============================================================\n";
 

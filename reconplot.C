@@ -20,6 +20,14 @@ void reconplot(int mode = 1, int sample = 0, const char* signalTag = "tth12gev")
   std::string fname;
   std::string tag;
 
+  // --- Signals (all masses handled via signalTag) ---
+  // Examples:
+  //   reconplot(1, 0, "tth12gev");
+  //   reconplot(1, 0, "tth15gev");
+  //   reconplot(1, 0, "tth20gev");
+  //   reconplot(1, 0, "tth25gev");
+  //   reconplot(1, 0, "tth30gev");
+  //   reconplot(1, 0, "tth60gev");
   if (sample == 0) {
     fname = std::string("output_signal_") + signalTag + ".root";
     tag   = std::string("_signal_") + signalTag;
@@ -161,13 +169,14 @@ void reconplot(int mode = 1, int sample = 0, const char* signalTag = "tth12gev")
 
     // ================= MULTIPLICITIES =================
     TCanvas *c_mult = new TCanvas(Form("c_mult%s", tag.c_str()), "Multiplicities", 1800, 600);
-    c_mult->Divide(5, 1);
+    c_mult->Divide(6, 1);
 
     DrawHist(1, c_mult, "h_nEle");
     DrawHist(2, c_mult, "h_nMu");
     DrawHist(3, c_mult, "h_nJet");
     DrawHist(4, c_mult, "h_nCJet");
     DrawHist(5, c_mult, "h_nBjet");
+    DrawHist(6, c_mult, "h_nDoubleB"); // NEW: was missing from the canvas
 
     c_mult->SaveAs(("multiplicity" + tag + ".png").c_str());
 
@@ -181,6 +190,16 @@ void reconplot(int mode = 1, int sample = 0, const char* signalTag = "tth12gev")
     DrawHist(4, c_dR, "h_dR_jet_mu_after");
 
     c_dR->SaveAs(("dR_jet_lepton" + tag + ".png").c_str());
+
+    // ================= MET (PRE-SELECTION) =================
+    // Filled in MyClass before the MET cut → shows MET distribution before cut
+    TCanvas *c_met_pre = new TCanvas(Form("c_met_pre%s", tag.c_str()), "MET preselection", 1200, 600);
+    c_met_pre->Divide(2, 1);
+
+    DrawHist(1, c_met_pre, "h_pre_MET_pt");
+    DrawHist(2, c_met_pre, "h_pre_MET_phi");
+
+    c_met_pre->SaveAs(("MET_preselection" + tag + ".png").c_str());
 
     std::cout << "MODE 1 plots saved." << std::endl;
 
@@ -203,6 +222,27 @@ void reconplot(int mode = 1, int sample = 0, const char* signalTag = "tth12gev")
     DrawHist(3, c_h, "h_Hdbb_eta");
 
     c_h->SaveAs(("Higgs_reco" + tag + ".png").c_str());
+
+    // ================= MET (PRE vs FINAL) =================
+    // pre: filled before MET cut
+    // final: filled after full selection
+    TCanvas *c_met = new TCanvas(Form("c_met%s", tag.c_str()), "MET", 1800, 600);
+    c_met->Divide(3, 1);
+
+    DrawHist(1, c_met, "h_pre_MET_pt");
+    DrawHist(2, c_met, "h_MET_pt_final");
+    DrawHist(3, c_met, "h_MET_phi_final");
+
+    c_met->SaveAs(("MET" + tag + ".png").c_str());
+
+    // ================= HT (FINAL) =================
+    if (TH1 *hht = GetH("h_HT")) {
+      TCanvas *c_ht = new TCanvas(Form("c_ht%s", tag.c_str()), "HT", 1000, 800);
+      c_ht->cd();
+      hht->Draw("HIST");
+      gPad->SetGrid();
+      c_ht->SaveAs(("HT" + tag + ".png").c_str());
+    }
 
     // ================= DOUBLE-B JETS =================
     TCanvas *c_dbk = new TCanvas(Form("c_dbk%s", tag.c_str()), "DoubleB jets", 2000, 1000);
@@ -250,14 +290,26 @@ void reconplot(int mode = 1, int sample = 0, const char* signalTag = "tth12gev")
     c_bj->SaveAs(("final_bjets" + tag + ".png").c_str());
 
     // ================= FINAL LEPTON =================
-    TCanvas *c_lep = new TCanvas(Form("c_lep%s", tag.c_str()), "Final lepton", 1600, 600);
-    c_lep->Divide(3, 1);
+    TCanvas *c_lep = new TCanvas(Form("c_lep%s", tag.c_str()), "Final leptons", 1600, 900);
+    c_lep->Divide(3, 2);
 
     DrawHist(1, c_lep, "h_lep1_pt_final");
     DrawHist(2, c_lep, "h_lep1_eta_final");
     DrawHist(3, c_lep, "h_lep1_phi_final");
+    DrawHist(4, c_lep, "h_lep2_pt_final");
+    DrawHist(5, c_lep, "h_lep2_eta_final");
+    DrawHist(6, c_lep, "h_lep2_phi_final");
 
-    c_lep->SaveAs(("final_lepton" + tag + ".png").c_str());
+    c_lep->SaveAs(("final_leptons" + tag + ".png").c_str());
+
+    // ================= DILEPTON =================
+    TCanvas *c_ll = new TCanvas(Form("c_ll%s", tag.c_str()), "Dilepton", 1200, 600);
+    c_ll->Divide(2, 1);
+
+    DrawHist(1, c_ll, "h_mll");
+    DrawHist(2, c_ll, "h_dRll");
+
+    c_ll->SaveAs(("dilepton" + tag + ".png").c_str());
 
     inFile->Close();
     delete inFile;
