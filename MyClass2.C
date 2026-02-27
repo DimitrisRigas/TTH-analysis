@@ -18,6 +18,9 @@
 #include <cctype>
 #include <TTree.h>
 #include <regex>
+#include "TMVA/Reader.h"
+#include "TMVA/Tools.h"
+#include "TSystem.h"
 
 using namespace std;
 
@@ -123,6 +126,8 @@ void MyClass::Loop() {
   Bool_t isTBbarQtoLNu      = false;
   Bool_t isTBbarQto2Q       = false;
   Bool_t isTbarWplusToNu2Q  = false;
+  Bool_t isTTZ = false;
+  Bool_t isTTW = false;
  
   std::string signalTag = "";  // will hold e.g. "tth12gev", "tth25gev", "tth60gev"
 
@@ -207,6 +212,12 @@ else if (f.find("glugluhtobb") != std::string::npos) {
  else if (f.find("tbarwplusto4q") != std::string::npos) {
    isTbarWplusTo4Q = true;
  }
+ else if (f.find("ttw") != std::string::npos) {
+   isTTW = true;
+ }
+ else if (f.find("ttz") != std::string::npos) {
+  isTTZ = true;
+ }
   
   // ------------------------------------------------------------------------
   // Output file name
@@ -229,6 +240,8 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   else if (isTTtoLNu2Q)       outFileName = "output_TTtoLNu2Q.root";
   else if (isTbarWplusToNu2Q) outFileName = "output_TbarWplusToNu2Q.root";
   else if (isTbarWplusTo4Q)   outFileName = "output_TbarWplusTo4Q.root";
+  else if (isTTW) outFileName = "output_TTW.root";
+  else if (isTTZ) outFileName = "output_TTZ.root";
   // =======================================================
   // Output ROOT file for histograms
   // =======================================================
@@ -365,6 +378,12 @@ else if (f.find("glugluhtobb") != std::string::npos) {
  }
  else if (isTbarWplusTo4Q) {
    sigma_pb = 19.114f;
+ }
+  else if (isTTW) {
+   sigma_pb = 0.4678f;
+ }
+  else if (isTTZ) {
+   sigma_pb = 0.6426f;
  }
  
  // Convert pb → fb
@@ -620,6 +639,8 @@ else if (f.find("glugluhtobb") != std::string::npos) {
   TH1F *h_lep2_phi = new TH1F( "h_lep2_phi_final", "Subleading lepton #phi (final); #phi; Entries", 64, -3.2, 3.2 );
   TH1F *h_mll      = new TH1F( "h_mll", "Dilepton invariant mass; m_{ll} [GeV]; Entries", 100, 0, 200 );
   TH1F *h_dRll     = new TH1F( "h_dRll", "#Delta R(l_{1}, l_{2}); #Delta R; Entries", 100, 0, 5 );
+// ---- TMVA BDT histogram
+TH1F *h_BDT = new TH1F("h_BDT", "BDT;BDT score;Entries", 50, -1.0, 1.0);
 
   // ------------------------------------------------------------------------
   // Cut-flow counters (for RECO only)
@@ -646,7 +667,50 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     int charge;  // +/-1
     int flavour; // 0 = electron, 1 = muon
   };
-
+  
+  // ---- TMVA Reader
+  TMVA::Tools::Instance();
+  // gSystem->Load("libTMVA"); // uncomment if needed on your setup
+  TMVA::Reader *reader = new TMVA::Reader("!Color:!Silent");
+  
+  // ---- Variables (MUST match training list + order)
+  float v_hbb_m    = 0.f;
+  float v_hbb_pt   = 0.f;
+  float v_dbj1_pt  = 0.f;
+  float v_dbj2_pt  = 0.f;
+  float v_dR_dbj12 = 0.f;
+  float v_dM_dbj12 = 0.f;
+  float v_met_pt   = 0.f;
+  float v_HT       = 0.f;
+ 
+  // ints in your tree -> give TMVA floats
+  float v_njet     = 0.f;
+  float v_nb       = 0.f;
+  
+  float v_mll      = 0.f;
+  float v_dRll     = 0.f;
+  float v_lep1_pt  = 0.f;
+  float v_lep2_pt  = 0.f;
+  
+  // AddVariable in SAME ORDER as training
+  reader->AddVariable("hbb_m",    &v_hbb_m);
+  reader->AddVariable("hbb_pt",   &v_hbb_pt);
+  reader->AddVariable("dbj1_pt",  &v_dbj1_pt);
+  reader->AddVariable("dbj2_pt",  &v_dbj2_pt);
+  reader->AddVariable("dR_dbj12", &v_dR_dbj12);
+  reader->AddVariable("dM_dbj12", &v_dM_dbj12);
+  reader->AddVariable("met_pt",   &v_met_pt);
+  reader->AddVariable("HT",       &v_HT);
+  reader->AddVariable("njet",     &v_njet);
+  reader->AddVariable("nb",       &v_nb);
+  reader->AddVariable("mll",      &v_mll);
+  reader->AddVariable("dRll",     &v_dRll);
+  reader->AddVariable("lep1_pt",  &v_lep1_pt);
+  reader->AddVariable("lep2_pt",  &v_lep2_pt);
+  
+  // Book MVA
+ reader->BookMVA("BDT", "dataset/weights/MVAnalysis_BDT.weights.xml");
+  
   // ========================================================================
   // 2. EVENT LOOP
   // ========================================================================
@@ -658,7 +722,7 @@ else if (f.find("glugluhtobb") != std::string::npos) {
     // Run GENERATOR LEVEL analysis , ONLY IF input file is the Signal:
     if (isSignal) {
       // ------------------------------------------------------------------
-      // 2B. GEN-LEVEL ANALYSIS
+      // 2Α. GEN-LEVEL ANALYSIS
       // ------------------------------------------------------------------
       std::vector<int> final_tops;
       std::vector<int> final_higgs;
@@ -1143,7 +1207,7 @@ for (int i = 0; i < nMuon; ++i) {
     h_pre_MET_pt ->Fill(PuppiMET_pt,  weight);
     h_pre_MET_phi->Fill(PuppiMET_phi, weight);
 
-    if (PuppiMET_pt < 20.0) continue;
+    if (PuppiMET_pt < 40.0) continue;
     ++nCut4;
 
     // Step 7: |mH - 125| < 50
@@ -1252,9 +1316,30 @@ if (vec_bjets.size() >= 2) {
  
  // HT (you already computed it)
  t_HT = HT;
+
+ // --- set TMVA inputs (after all cuts, final selection)
+ v_hbb_m    = HiggsCand.M();
+ v_hbb_pt   = HiggsCand.Pt();
+ v_dbj1_pt  = db1.Pt();
+ v_dbj2_pt  = db2.Pt();
+ v_dR_dbj12 = db1.DeltaR(db2);
+ v_dM_dbj12 = std::fabs(db1.M() - db2.M());
+ v_met_pt   = PuppiMET_pt;
+ v_HT       = HT;
+ 
+ v_njet     = (float)vec_cjet.size();
+ v_nb       = (float)vec_bjets.size();
+
+ v_mll      = ll.M();
+ v_dRll     = l1.p4.DeltaR(l2.p4);
+ v_lep1_pt  = l1.p4.Pt();
+ v_lep2_pt  = l2.p4.Pt();
+ 
+// Evaluate + fill
+ const float bdtScore = reader->EvaluateMVA("BDT");
+ h_BDT->Fill(bdtScore, weight);
  
  outTree->Fill();
- 
   } // end event loop
   // ======================= PART 3/3 =======================
   // ========================================================================
@@ -1330,7 +1415,7 @@ std::cout << std::left << std::setw(35) << "Step 0) Raw events"
   //        << std::setw(30) << formatYield(nCut5, w)
   //        << std::setw(15) << eff_decimal(nCut5) << std::endl;
 
-  std::cout << std::left << std::setw(35) << "Step 4) MET >= 20 GeV"
+  std::cout << std::left << std::setw(35) << "Step 4) MET >= 40 GeV"
             << std::setw(25) << formatRaw(nCut4)
             << std::setw(30) << formatYield(nCut4, w)
             << std::setw(15) << eff_decimal(nCut4) << std::endl;

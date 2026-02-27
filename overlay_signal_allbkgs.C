@@ -2,15 +2,17 @@
 // Mode-2 overlays: Signal vs ALL backgrounds at once using THStack,
 // plus ratio pad S / (sum backgrounds).
 //
-// One histogram per canvas, saved as PDF into ./plots/
+// UPDATED: also overlays Signal tth30gev as a second signal curve (blue dashed),
+// and draws TWO ratios: S12/ΣB and S30/ΣB.
 //
 // Run:
 //   .L overlay_signal_allbkgs.C
 //   overlay_signal_allbkgs("tth12gev", true,  true);   // shapes (unit area), keep windows
-//   overlay_signal_allbkgs("tth60gev", false, false);  // raw entries, close windows
+//   overlay_signal_allbkgs("tth12gev", false, false);  // raw entries, close windows
 //
 // Notes:
 // - If normalize=true: each component (signal + each bkg) is unit-area normalized (shape compare).
+//   (This is your original behavior; kept unchanged.)
 // - If normalize=false: plots raw entries from each file (only meaningful if your analysis filled weighted hists).
 // - Histograms are cloned into gROOT so files can be closed safely.
 
@@ -156,17 +158,18 @@ static std::string PrettyKey(const std::string& hname) {
 }
 
 // ----------------------------------------------------------------------------
-// Draw stacked backgrounds + signal overlay with ratio S/sumB
-// (Draws inside the CURRENT canvas; creates its own top/bottom pads)
+// Draw stacked backgrounds + TWO signal overlays with ratio pads
+// Ratio shows BOTH: S(main signalTag)/ΣB and S30/ΣB
 // ----------------------------------------------------------------------------
-static void DrawStackWithRatio(TCanvas* c,
-                               const char* hnameKey,
-                               TH1* hs_in,
-                               const std::vector<TH1*>& hb_list_in,
-                               const std::vector<std::string>& bkgLabels,
-                               const char* sigLabel,
-                               bool normalize) {
-  if (!c || !hs_in || hb_list_in.empty() || !hnameKey) return;
+static void DrawStackWithRatio2Sig(TCanvas* c,
+                                  const char* hnameKey,
+                                  TH1* hsA_in, TH1* hsB_in,
+                                  const std::vector<TH1*>& hb_list_in,
+                                  const std::vector<std::string>& bkgLabels,
+                                  const char* sigALabel,
+                                  const char* sigBLabel,
+                                  bool normalize) {
+  if (!c || !hsA_in || !hsB_in || hb_list_in.empty() || !hnameKey) return;
 
   c->cd();
 
@@ -185,14 +188,16 @@ static void DrawStackWithRatio(TCanvas* c,
   pBot->SetRightMargin(0.05);
   pBot->Draw();
 
-  // Clone signal for per-draw styling
-  TH1* hs = (TH1*)hs_in->Clone(Form("%s__draw_sig__%u", hs_in->GetName(), gRandom->Integer(1e9)));
-  hs->SetDirectory(gROOT);
-  Prep(hs, normalize);
-  SetNiceLabels(hs, hnameKey, normalize);
+  // Clone signals for per-draw styling
+  TH1* hsA = (TH1*)hsA_in->Clone(Form("%s__draw_sigA__%u", hsA_in->GetName(), gRandom->Integer(1e9)));
+  TH1* hsB = (TH1*)hsB_in->Clone(Form("%s__draw_sigB__%u", hsB_in->GetName(), gRandom->Integer(1e9)));
+  hsA->SetDirectory(gROOT);
+  hsB->SetDirectory(gROOT);
+  Prep(hsA, normalize);
+  Prep(hsB, normalize);
 
   // Build stack + sum
-  THStack* st = new THStack(Form("st_%s_%u", hs_in->GetName(), gRandom->Integer(1e9)), "");
+  THStack* st = new THStack(Form("st_%s_%u", hnameKey, gRandom->Integer(1e9)), "");
   TH1* hbSum = nullptr;
 
   const int colors[] = {kAzure-9, kGreen-7, kOrange-2, kMagenta-7, kCyan-7, kYellow-7,
@@ -229,10 +234,17 @@ static void DrawStackWithRatio(TCanvas* c,
   if (!hbSum) return;
   SetNiceLabels(hbSum, hnameKey, normalize);
 
-  // Signal style
-  hs->SetLineWidth(3);
-  hs->SetLineColor(kRed+1);
-  hs->SetFillStyle(0);
+  // Signal styles (A = red solid, B = blue dashed)
+  hsA->SetLineWidth(3);
+  hsA->SetLineColor(kRed+1);
+  hsA->SetLineStyle(1);
+  hsA->SetFillStyle(0);
+
+  hsB->SetLineWidth(3);
+  hsB->SetLineColor(kYellow+2);   // nice orange
+  hsB->SetLineStyle(1);           // solid line
+  hsB->SetFillStyle(0);
+ 
 
   // TOP
   pTop->cd();
@@ -241,57 +253,87 @@ static void DrawStackWithRatio(TCanvas* c,
   hbSum->GetXaxis()->SetLabelSize(0.0);
   hbSum->GetXaxis()->SetTitleSize(0.0);
 
-  const double ymax = std::max(hs->GetMaximum(), hbSum->GetMaximum());
+  const double ymax = std::max({hsA->GetMaximum(), hsB->GetMaximum(), hbSum->GetMaximum()});
   hbSum->SetMaximum(1.30 * ymax);
   hbSum->SetMinimum(0.0);
 
   hbSum->Draw("HIST");
   st->Draw("HIST SAME");
-  hs->Draw("HIST SAME");
+  hsA->Draw("HIST SAME");
+  hsB->Draw("HIST SAME");
 
   // Legend
-  TLegend* leg = new TLegend(0.55, 0.50, 0.90, 0.90);
+  TLegend* leg = new TLegend(0.75, 0.30, 0.90, 0.90);
   leg->SetBorderSize(0);
   leg->SetFillStyle(0);
 
-  leg->AddEntry(hs, sigLabel, "l");
+  leg->AddEntry(hsA, sigALabel, "l");
+  leg->AddEntry(hsB, sigBLabel, "l");
   for (size_t i = 0; i < hb_drawn.size(); ++i) {
     const std::string& lab = (i < bkgLabels.size()) ? bkgLabels[i] : std::string(Form("Bkg%zu", i));
     leg->AddEntry(hb_drawn[i], lab.c_str(), "f");
   }
   leg->Draw();
 
-  // RATIO: S / sumB
+  // RATIO: S / sumB for BOTH signals
   pBot->cd();
   pBot->SetGrid();
 
-  TH1* hr = (TH1*)hs->Clone(Form("%s__ratio__%u", hs->GetName(), gRandom->Integer(1e9)));
-  hr->SetDirectory(gROOT);
-  hr->Divide(hbSum);
+  auto makeRatio = [&](TH1* hs, const char* tag) {
+    TH1* hr = (TH1*)hs->Clone(Form("%s__ratio_%s__%u", hs->GetName(), tag, gRandom->Integer(1e9)));
+    hr->SetDirectory(gROOT);
 
-  hr->SetLineColor(kBlack);
-  hr->SetLineWidth(2);
-  hr->SetMarkerStyle(20);
-  hr->SetMarkerSize(0.6);
+    // Safer than hr->Divide(hbSum) (avoids inf/NaN when hbSum bin is 0)
+    for (int ib = 1; ib <= hr->GetNbinsX(); ++ib) {
+      const double b = hbSum->GetBinContent(ib);
+      const double s = hs->GetBinContent(ib);
+      const double es = hs->GetBinError(ib);
+      if (b > 0) {
+        hr->SetBinContent(ib, s / b);
+        hr->SetBinError(ib, es / b); // ignores bkg uncertainty (fine for quick-look)
+      } else {
+        hr->SetBinContent(ib, 0.0);
+        hr->SetBinError(ib, 0.0);
+      }
+    }
 
-  hr->SetTitle("");
-  hr->GetYaxis()->SetTitle("S/#SigmaB");
-  hr->GetYaxis()->CenterTitle(true);
+    hr->SetTitle("");
+    hr->GetYaxis()->SetTitle("S/#SigmaB");
+    hr->GetYaxis()->CenterTitle(true);
 
-  hr->GetYaxis()->SetNdivisions(505);
-  hr->GetYaxis()->SetTitleSize(0.12);
-  hr->GetYaxis()->SetLabelSize(0.10);
-  hr->GetYaxis()->SetTitleOffset(0.50);
+    hr->GetYaxis()->SetNdivisions(505);
+    hr->GetYaxis()->SetTitleSize(0.12);
+    hr->GetYaxis()->SetLabelSize(0.10);
+    hr->GetYaxis()->SetTitleOffset(0.50);
 
-  hr->GetXaxis()->SetTitleSize(0.14);
-  hr->GetXaxis()->SetLabelSize(0.12);
-  hr->GetXaxis()->SetTitleOffset(1.10);
-  hr->GetXaxis()->SetTitle(hbSum->GetXaxis()->GetTitle());
+    hr->GetXaxis()->SetTitleSize(0.14);
+    hr->GetXaxis()->SetLabelSize(0.12);
+    hr->GetXaxis()->SetTitleOffset(1.10);
+    hr->GetXaxis()->SetTitle(hbSum->GetXaxis()->GetTitle());
 
-  hr->SetMinimum(0.0);
-  hr->SetMaximum(2.0);
+    hr->SetMinimum(0.0);
+    hr->SetMaximum(2.0);
 
-  hr->Draw("EP");
+    return hr;
+  };
+
+  TH1* rA = makeRatio(hsA, "A");
+  TH1* rB = makeRatio(hsB, "B");
+
+  rA->SetLineColor(kRed+1);
+  rA->SetLineWidth(2);
+  rA->SetMarkerStyle(20);
+  rA->SetMarkerSize(0.6);
+  rA->SetMarkerColor(kRed+1);
+  
+  rB->SetLineColor(kYellow+2);
+  rB->SetLineWidth(2);
+  rB->SetMarkerStyle(24);
+  rB->SetMarkerSize(0.6);
+  rB->SetMarkerColor(kYellow+7);
+  
+  rA->Draw("EP");
+  rB->Draw("EP SAME");
 
   // IMPORTANT: force paint for PDF
   c->Modified();
@@ -304,14 +346,20 @@ static void DrawStackWithRatio(TCanvas* c,
 static void MakeOnePlotPDF(const std::string& hname,
                            TFile* fs,
                            const std::string& signalTag,
+                           TFile* fs30, // NEW: file for tth30gev
                            const std::vector<std::pair<BkgInfo,TFile*>>& obkgs,
                            bool normalize,
                            int ibin) {
-  const std::string sigLabel = std::string("Signal ") + signalTag;
+  const std::string sigLabel  = std::string("Signal ") + signalTag;
+  const std::string sig30Tag  = "tth30gev";
+  const std::string sig30Label = "Signal ttH (mA30)";
 
-  TH1* hs = CloneToROOT(fs, std::string("SIG_") + signalTag, hname.c_str());
-  if (!hs) return;
+  TH1* hs  = CloneToROOT(fs,   std::string("SIG_") + signalTag, hname.c_str());
+  TH1* hs30 = CloneToROOT(fs30, std::string("SIG_") + sig30Tag, hname.c_str());
+  if (!hs || !hs30) return;
+
   hs->Rebin(ibin);
+  hs30->Rebin(ibin);
 
   std::vector<TH1*> hb_list;
   std::vector<std::string> labels;
@@ -336,38 +384,35 @@ static void MakeOnePlotPDF(const std::string& hname,
   }
 
   const std::string mode = normalize ? "norm" : "raw";
-  const std::string out = "plots/" + PrettyKey(hname) + "_" + signalTag + "_" + mode + ".pdf";
+  const std::string out = "plots/" + PrettyKey(hname) + "_" + signalTag + "_plus_tth30gev_" + mode + ".pdf";
 
   // One canvas per histogram
   TCanvas* c = new TCanvas(Form("c_%s_%u", hname.c_str(), gRandom->Integer(1e9)),
                            hname.c_str(), 900, 800);
 
-  DrawStackWithRatio(c, hname.c_str(), hs, hb_list, labels, sigLabel.c_str(), normalize);
+  DrawStackWithRatio2Sig(c, hname.c_str(), hs, hs30, hb_list, labels,
+                         sigLabel.c_str(), sig30Label.c_str(), normalize);
 
   // Save via the CANVAS (NOT gPad) -> avoids blank PDFs
   c->Modified();
   c->Update();
   c->Print(out.c_str());
-
-  if (gROOT->IsBatch() == kFALSE) {
-    // keepWindowsOpen handled by caller (push into gCanvases or delete)
-  }
 }
 
 // ----------------------------------------------------------------------------
 // Main
 // ----------------------------------------------------------------------------
-void overlay_signal_allbkgs(const char* signalTag = "tth12gev",
+void overlay_signal_allbkgs(const char* signalTag = "ttH (mA12)",
                            bool normalize = true,
                            bool keepWindowsOpen = true) {
   gStyle->SetOptStat(0);
 
-  // Make sure plots/ exists (you said it already exists, but this is harmless)
+  // Make sure plots/ exists
   gSystem->mkdir("plots", kTRUE);
 
   Int_t ibin = 4;  // rebin factor for ALL histograms
 
-  // Signal file
+  // Signal file (main)
   const std::string fSig = std::string("output_signal_") + signalTag + ".root";
   TFile* fs = TFile::Open(fSig.c_str(), "READ");
   if (!fs || fs->IsZombie()) {
@@ -375,11 +420,20 @@ void overlay_signal_allbkgs(const char* signalTag = "tth12gev",
     return;
   }
 
+  // NEW: Signal 30 file
+  const std::string fSig30 = "output_signal_tth30gev.root";
+  TFile* fs30 = TFile::Open(fSig30.c_str(), "READ");
+  if (!fs30 || fs30->IsZombie()) {
+    std::cout << "ERROR: cannot open signal30 file " << fSig30 << "\n";
+    fs->Close(); delete fs;
+    return;
+  }
+
   // Background list (edit freely)
   std::vector<BkgInfo> bkgs = {
     {"output_ttbar.root",            "TT_dilep",        "t#bar{t} dilepton"},
-    // {"output_TTtoLNu2Q.root",        "TT_semilep",      "t#bar{t} semileptonic"},
-    // {"output_DYee.root",             "DYee",            "DY#rightarrow ee"},
+    {"output_TTtoLNu2Q.root",        "TT_semilep",      "t#bar{t} semileptonic"},
+    {"output_DYee.root",             "DYee",            "DY#rightarrow ee"},
     {"output_DYmumu.root",           "DYmumu",          "DY#rightarrow #mu#mu"},
     {"output_WW.root",               "WW",              "WW"},
     {"output_WZ.root",               "WZ",              "WZ"},
@@ -410,6 +464,7 @@ void overlay_signal_allbkgs(const char* signalTag = "tth12gev",
   if (obkgs.empty()) {
     std::cout << "ERROR: no background files could be opened.\n";
     fs->Close(); delete fs;
+    fs30->Close(); delete fs30;
     return;
   }
 
@@ -434,7 +489,7 @@ void overlay_signal_allbkgs(const char* signalTag = "tth12gev",
   };
 
   for (const auto& hname : allH) {
-    MakeOnePlotPDF(hname, fs, signalTag, obkgs, normalize, ibin);
+    MakeOnePlotPDF(hname, fs, signalTag, fs30, obkgs, normalize, ibin);
   }
 
   // Close files safely (histograms are cloned to gROOT)
@@ -442,8 +497,8 @@ void overlay_signal_allbkgs(const char* signalTag = "tth12gev",
     ob.second->Close();
     delete ob.second;
   }
-  fs->Close();
-  delete fs;
+  fs->Close();   delete fs;
+  fs30->Close(); delete fs30;
 
   std::cout << "Done. PDFs saved in ./plots/ ("
             << (normalize ? "normalized" : "raw") << ", rebin=" << ibin << ")\n";
