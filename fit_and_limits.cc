@@ -1,568 +1,769 @@
+// fit_and_limits.cc
 #include <iostream>
-#include "TCanvas.h"
-#include "TH1F.h"
-#include "TFile.h"
-#include "TGraph.h"
-#include "TSpline.h"
-#include "RooRealVar.h"
-#include "RooDataSet.h"
-#include "RooGaussian.h"
-#include "RooPlot.h"
-#include "RooFitResult.h"
-#include "RooAddPdf.h"
-#include "RooDataHist.h"
-#include "RooArgList.h"
-#include "RooHist.h"
-#include "RooBinning.h"
-#include "RooMCStudy.h"
-#include "RooStats/SimpleInterval.h"
-#include "RooStats/BayesianCalculator.h"
-#include "RooStats/ProfileLikelihoodCalculator.h"
-#include "RooStats/LikelihoodIntervalPlot.h"
-#include "RooStats/AsymptoticCalculator.h"
-#include "RooStats/ProposalHelper.h"
-#include "TH2.h"
-#include "TCutG.h"
-#include "TGraphErrors.h"
-#include "TGraphAsymmErrors.h"
-#include "TMultiGraph.h"
-#include "TSpline.h"
-#include "TMatrixDSym.h"
+#include <vector>
+#include <algorithm>
+#include <cmath>
 
+#include "TFile.h"
+#include "TH1.h"
+#include "TH1F.h"
+#include "TCanvas.h"
+#include "TLegend.h"
+#include "TLatex.h"
+#include "TLine.h"
+#include "TMatrixDSym.h"
+#include "TGraphErrors.h"
+#include "TGraph.h"
+#include "TGraphAsymmErrors.h"
+#include "TF1.h"
+#include "TStyle.h"
+#include "TROOT.h"
+#include "TSystem.h"
+
+#include "RooConstVar.h"
+#include "RooRealVar.h"
+#include "RooBinning.h"
+#include "RooDataHist.h"
+#include "RooHistPdf.h"
+#include "RooAddPdf.h"
+#include "RooProdPdf.h"
+#include "RooGaussian.h"
+#include "RooFitResult.h"
+#include "RooPlot.h"
+#include "RooHist.h"
+#include "RooMinimizer.h"
+#include "RooWorkspace.h"
+#include "RooArgSet.h"
+#include "RooArgList.h"
+
+#include "RooStats/ModelConfig.h"
+#include "RooStats/MCMCCalculator.h"
+#include "RooStats/MCMCInterval.h"
+#include "RooStats/MCMCIntervalPlot.h"
+#include "RooStats/ProposalHelper.h"
+#include "RooStats/ProposalFunction.h"
 
 using namespace RooFit;
 using namespace RooStats;
 
-// Bayesian Markov Chain Monte Carlo (MCMC) analysis
-struct BayesianMCMCOptions
-{
+// ------------------------------
+// MCMC options
+// ------------------------------
+struct BayesianMCMCOptions {
   double CL_95 = 0.95;
-  double CL_68 = 0.68;
- 
-  // MCMCInterval::IntervalType intervalType = MCMCInterval::Upper;
-  // type of interval (0 is shortest, 1 central, 2 upper limit)
-  double maxPOI = -999;      // force different values of POI (Parameters of Interest) for doing the scan (default is given value)
-  double minPOI = -999;
-  int numIters = 10000;    // number of iterations
-  int numBurnInSteps = 1000; // number of burn in steps to be ignored
+  int numIters = 10000;
+  int numBurnInSteps = 0; // safest for your ROOT version
 };
-
-
-
 BayesianMCMCOptions optMCMC;
 
+// ------------------------------
+// Helpers
+// ------------------------------
+static TH1* getHistOrDie(TFile* f, const char* hname, const char* tag) {
+  if (!f || f->IsZombie()) {
+    std::cerr << "[FATAL] File open failed for: " << tag << std::endl;
+    return nullptr;
+  }
+  TH1* h = dynamic_cast<TH1*>(f->Get(hname));
+  if (!h) {
+    std::cerr << "[FATAL] Histogram '" << hname << "' not found in " << tag << std::endl;
+    return nullptr;
+  }
+  return h;
+}
+
+static double safeSigma(double nominal, double rel) {
+  const double s = std::fabs(nominal) * rel;
+  return (s > 1e-6 ? s : 1.0);
+}
+
+static TString signalFileForMass(int mass) {
+  return TString::Format("output_signal_tth%dgev.root", mass);
+}
+
+static TMatrixDSym scaleCovMatrix(const TMatrixDSym& cov, double scale)
+{
+  TMatrixDSym c(cov);
+  c *= (scale * scale);
+  return c;
+}
+
+// ------------------------------
+// Main
+// ------------------------------
 void fit_and_limits()
 {
+  gStyle->SetOptStat(1110);
+  gStyle->SetOptFit(1111);
 
-  
-  //  bool obs("true");
-   bool exp("true");
-  TString lep("0");
-  TString sr("2");
-  TString boost("grad");
-  std::vector<int> mass_points = {60};
-  
-  
-  std::vector<double> observed_limits;
-  std::vector<double> expected_limits;
-  std::vector<double> sigma_1_up, sigma_1_down;
-  std::vector<double> sigma_2_up, sigma_2_down;
-  std::vector<double> observed_br_limits;
-  std::vector<double> expected_br_limits;
-  std::vector<double> toy_br_limits;
-  std::vector<double> sigma_1_br_up, sigma_1_br_down;
-  std::vector<double> sigma_2_br_up, sigma_2_br_down;
-  
+  // create output folder
+  gSystem->mkdir("fits_and_limit_plots", kTRUE);
+
+  // mass points
+  std::vector<int> mass_points = {12,15,20,25,30};
+
+  // toys
   const int Ntoys = 1001;
 
-  for(size_t i = 0; i < mass_points.size(); ++i)
+  // DO NOT TOUCH BINS
+  const int b = 4;
+  double var_bins[b+1];
+  var_bins[0] = -1;
+  var_bins[1] = -0.4;
+  var_bins[2] = -0.08;
+  var_bins[3] = 0.52;
+  var_bins[4] = 1;
+
+  // results
+  std::vector<double> expected_br_limits;
+  std::vector<double> sigma_1_br_up, sigma_1_br_down;
+  std::vector<double> sigma_2_br_up, sigma_2_br_down;
+
+  // keep masses as doubles for final limit plot
+  std::vector<double> mass_points_d;
+
+  for (size_t im = 0; im < mass_points.size(); ++im) {
+    const int mass = mass_points[im];
+    mass_points_d.push_back((double)mass);
+
+    // =========================================================
+    // 1) Input files
+    // =========================================================
+    TFile *fsig   = TFile::Open(signalFileForMass(mass), "READ");
+    TFile *ftt    = TFile::Open("output_ttbar.root", "READ");
+    TFile *ftt2q  = TFile::Open("output_TTtoLNu2Q.root", "READ");
+    TFile *fTTHbb = TFile::Open("output_TTH_Hbb.root", "READ");
+    TFile *fTTW   = TFile::Open("output_TTW.root", "READ");
+    TFile *fTTZ   = TFile::Open("output_TTZ.root", "READ");
+
+    // =========================================================
+    // 2) Histograms
+    // =========================================================
+    const char* HNAME = "h_BDT";
+
+    TH1* h_sig   = getHistOrDie(fsig,   HNAME, fsig   ? fsig->GetName()   : "sig");
+    TH1* h_tt    = getHistOrDie(ftt,    HNAME, ftt    ? ftt->GetName()    : "ttbar");
+    TH1* h_tt2q  = getHistOrDie(ftt2q,  HNAME, ftt2q  ? ftt2q->GetName()  : "tt2q");
+    TH1* h_tthbb = getHistOrDie(fTTHbb, HNAME, fTTHbb ? fTTHbb->GetName() : "tthbb");
+    TH1* h_ttw   = getHistOrDie(fTTW,   HNAME, fTTW   ? fTTW->GetName()   : "ttw");
+    TH1* h_ttz   = getHistOrDie(fTTZ,   HNAME, fTTZ   ? fTTZ->GetName()   : "ttz");
+
+    if (!h_sig || !h_tt || !h_tt2q || !h_tthbb || !h_ttw || !h_ttz) {
+      std::cerr << "[FATAL] Missing input histogram(s). Fix file names / hist names.\n";
+      return;
+    }
+
+    // =========================================================
+    // 3) Rebin
+    // =========================================================
+    TH1* h_sig_r   = h_sig  ->Rebin(b, "h_sig_r",   var_bins);
+    TH1* h_tt_r    = h_tt   ->Rebin(b, "h_tt_r",    var_bins);
+    TH1* h_tt2q_r  = h_tt2q ->Rebin(b, "h_tt2q_r",  var_bins);
+    TH1* h_tthbb_r = h_tthbb->Rebin(b, "h_tthbb_r", var_bins);
+    TH1* h_ttw_r   = h_ttw  ->Rebin(b, "h_ttw_r",   var_bins);
+    TH1* h_ttz_r   = h_ttz  ->Rebin(b, "h_ttz_r",   var_bins);
+
+    // =========================================================
+    // 3b) Combined TT semileptonic histogram:
+    //     TTtoLNu2Q + TTH(H->bb) + TTW + TTZ
+    // =========================================================
+    TH1* h_ttsemi_r = (TH1*)h_tt2q_r->Clone("h_ttsemi_r");
+    h_ttsemi_r->Reset();
+    h_ttsemi_r->Add(h_tt2q_r);
+    h_ttsemi_r->Add(h_tthbb_r);
+    h_ttsemi_r->Add(h_ttw_r);
+    h_ttsemi_r->Add(h_ttz_r);
+
+    // =========================================================
+    // 4) Observable
+    // =========================================================
+    RooRealVar output_BDT("output_BDT", "BDT score", -1, 1);
+    RooBinning customBinning(b, var_bins);
+    output_BDT.setBinning(customBinning, "customBinning");
+
+    // =========================================================
+    // 5) RooDataHists + RooHistPdf
+    // =========================================================
+    RooDataHist dh_sig    ("sig",    "sig",    output_BDT, h_sig_r);
+    RooDataHist dh_tt     ("tt",     "tt",     output_BDT, h_tt_r);
+    RooDataHist dh_ttsemi ("ttsemi", "ttsemi", output_BDT, h_ttsemi_r);
+
+    RooHistPdf pdf_sig    ("sig_pdf",    "sig_pdf",    output_BDT, dh_sig);
+    RooHistPdf pdf_tt     ("tt_pdf",     "tt_pdf",     output_BDT, dh_tt);
+    RooHistPdf pdf_ttsemi ("ttsemi_pdf", "ttsemi_pdf", output_BDT, dh_ttsemi);
+
+    // =========================================================
+    // 6) Yields
+    // =========================================================
+    const double Nsig    = h_sig_r->Integral();
+    const double Ntt     = h_tt_r->Integral();
+    const double Nttsemi = h_ttsemi_r->Integral();
+
+    const double Nbkg = Ntt + Nttsemi;
+    const double denominator = (Nsig > 0 ? Nsig : 1.0);
+
+    // =========================================================
+    // 7) Parameters + constraints
+    // =========================================================
+    RooRealVar Nexp_sig   ("Nexp_sig",   "Expected signal events",
+                           Nsig, 0.0, 1000.0 * std::max(1.0, Nsig));
+    RooRealVar Nexp_tt    ("Nexp_tt",    "Expected TT dileptonic",
+                           Ntt, 0.0, 10.0 * std::max(1.0, Ntt));
+    RooRealVar Nexp_ttsemi("Nexp_ttsemi","Expected TT semileptonic",
+                           Nttsemi, 0.0, 10.0 * std::max(1.0, Nttsemi));
+
+    const double rel_tt     = 0.15;
+    const double rel_ttsemi = 0.30;
+
+    RooConstVar tt_nom     ("tt_nom",     "tt_nom",     Ntt);
+    RooConstVar tt_sig     ("tt_sig",     "tt_sig",     safeSigma(Ntt, rel_tt));
+    RooConstVar ttsemi_nom ("ttsemi_nom", "ttsemi_nom", Nttsemi);
+    RooConstVar ttsemi_sig ("ttsemi_sig", "ttsemi_sig", safeSigma(Nttsemi, rel_ttsemi));
+
+    RooGaussian c_tt    ("c_tt",    "constraint tt",     Nexp_tt,     tt_nom,     tt_sig);
+    RooGaussian c_ttsemi("c_ttsemi","constraint ttsemi", Nexp_ttsemi, ttsemi_nom, ttsemi_sig);
+
+    // =========================================================
+    // 8) Models
+    // =========================================================
+    RooAddPdf model_0("model_0", "Background-only (extended)",
+      RooArgList(pdf_tt, pdf_ttsemi),
+      RooArgList(Nexp_tt, Nexp_ttsemi)
+    );
+
+    RooAddPdf model_1("model_1", "Signal+Background (extended)",
+      RooArgList(pdf_sig, pdf_tt, pdf_ttsemi),
+      RooArgList(Nexp_sig, Nexp_tt, Nexp_ttsemi)
+    );
+
+    RooProdPdf total_model_0("total_model_0", "b-only with constraints",
+      RooArgList(model_0, c_tt, c_ttsemi)
+    );
+
+    RooProdPdf total_model_1("total_model_1", "s+b with constraints",
+      RooArgList(model_1, c_tt, c_ttsemi)
+    );
+
+    // =========================================================
+    // 9) Asimov dataset
+    // =========================================================
+    RooDataHist* data_asimov_B = total_model_0.generateBinned(
+      output_BDT,
+      RooFit::ExpectedData(true),
+      RooFit::Name("asimov_B")
+    );
+
+    RooFitResult* fit_asimov = total_model_1.fitTo(
+      *data_asimov_B,
+      Save(),
+      Extended(kTRUE),
+      RooFit::MaxCalls(20000),
+      Strategy(2),
+      RooFit::Optimize(kTRUE),
+      RooFit::SumW2Error(kTRUE)
+    );
+
+    // =========================================================
+    // 10) One pseudodata fit
+    // =========================================================
+    RooDataHist* data_toy_B = total_model_0.generateBinned(
+      output_BDT,
+      RooFit::Extended(true),
+      RooFit::Name("toy_B")
+    );
+
+    RooFitResult* fit_toy = total_model_1.fitTo(
+      *data_toy_B,
+      Save(),
+      Extended(kTRUE),
+      RooFit::MaxCalls(20000),
+      Strategy(2),
+      RooFit::Optimize(kTRUE),
+      RooFit::SumW2Error(kTRUE)
+    );
+
+    // =========================================================
+    // 10b) Plot 1 pseudodata + fit + normalized signal overlay
+    //      backgrounds shown as TTbar and TT semileptonic
+    // =========================================================
     {
-      int mass = mass_points[i];
-      TString amass = TString::Format("%d", mass);
-      //input files
-      TFile *sigm = TFile::Open("sig"+amass+"_"+lep+"lep.root");
-      TFile *ftt1 = TFile::Open("hist_TT_filt1_"+lep+"lep.root");
-      TFile *ftt4 = TFile::Open("hist_TT_filt4_"+lep+"lep.root");
-      TFile *ftt5 = TFile::Open("hist_TT_filt5_"+lep+"lep.root");
-      TFile *fznn = TFile::Open("hist_znn.root");
-      TFile *fw = TFile::Open("hist_w.root");
-      TFile *fqcd = TFile::Open("hist_QCDpl.root");
-      TFile *foth = TFile::Open("hist_others_"+lep+"lep.root");
+      TCanvas* c_bdt = new TCanvas("c_bdt","Pseudodata + fit",900,800);
+      RooPlot* fr = output_BDT.frame();
 
-      //define bin edges for variable binning of bdt score
-      int b=4;
-      double var_bins[b+1] ;
-   
+      data_toy_B->plotOn(fr, Name("toydata"));
+      total_model_1.plotOn(fr, Name("fullfit"), LineColor(kBlue));
 
-      //bins
+      total_model_1.plotOn(fr, Components("tt_pdf"),
+                           LineColor(kRed+1), LineStyle(kSolid), Name("ttcomp"));
+      total_model_1.plotOn(fr, Components("ttsemi_pdf"),
+                           LineColor(kMagenta+1), LineStyle(kSolid), Name("ttsemicomp"));
 
-	
-	var_bins[0] = -1;
-	var_bins[1] = -0.4;
-	var_bins[2] = -0.08;
-	var_bins[3] = 0.52;
-	var_bins[4] = 1;
- 
+      // signal superimposed with fitted normalization
+      total_model_1.plotOn(fr, Components("sig_pdf"),
+                           LineColor(kBlack), LineStyle(kDashed), Name("sigonly"));
 
-      //input bdt histos
-      TH1 *h_m =(TH1*)sigm->Get("sr"+sr+"_"+boost+"_bdt");
-      TH1 *h_tt1 =(TH1*)ftt1->Get("sr"+sr+"_"+boost+"_bdt");
-      TH1 *h_tt4 =(TH1*)ftt4->Get("sr"+sr+"_"+boost+"_bdt");
-      TH1 *h_tt5 =(TH1*)ftt5->Get("sr"+sr+"_"+boost+"_bdt");
-      TH1 *h_znn =(TH1*)fznn->Get("sr"+sr+"_"+boost+"_bdt");
-      TH1 *h_w =(TH1*)fw->Get("sr"+sr+"_"+boost+"_bdt");
-      TH1 *h_qcd =(TH1*)fqcd->Get("sr"+sr+"_"+boost+"_bdt");
-      TH1 *h_oth =(TH1*)foth->Get("sr"+sr+"_"+boost+"_bdt");
-      //rebin input histos using the variable binning
-      TH1*h_m_r= h_m->Rebin(b, "h_m_r", var_bins);
-      TH1*h_znn_r= h_znn->Rebin(b, "h_znn_r", var_bins);
-      TH1*h_w_r= h_w->Rebin( b, "h_w_r", var_bins);
-      TH1*h_qcd_r= h_qcd->Rebin(b, "h_qcd_r", var_bins);
-      TH1*h_oth_r= h_oth->Rebin(b, "h_oth_r", var_bins);
-      TH1*h_tt1_r= h_tt1->Rebin(b, "h_tt1_r", var_bins);
-      TH1*h_tt4_r= h_tt4->Rebin(b, "h_tt4_r", var_bins);
-      TH1*h_tt5_r= h_tt5->Rebin(b, "h_tt5_r", var_bins);
+      fr->SetTitle(TString::Format("Pseudodata + fit, m_{a}=%d GeV", mass));
+      fr->GetXaxis()->SetTitle("BDT score");
+      fr->GetYaxis()->SetTitle("Events");
+      fr->Draw();
 
-      //observable (rebinned bdt score)
-      RooRealVar output_BDT("output_BDT","BDT score",-1,1);
-      RooBinning customBinning(4, var_bins); // bins with specified edges
-      output_BDT.setBinning(customBinning, "customBinning");
-      
-     //define roodatahists from hist
-     RooDataHist sig("sig","sig",output_BDT,h_m_r);
-     RooDataHist tt1("tt1","tt1",output_BDT,h_tt1_r);
-     RooDataHist tt4("tt4","tt4",output_BDT,h_tt4_r);
-     RooDataHist tt5("tt5","tt5",output_BDT,h_tt5_r);
-     RooDataHist w("w","w",output_BDT,h_w_r);
-     RooDataHist qcd("qcd","qcd",output_BDT,h_qcd_r);
-     RooDataHist znn("znn","znn",output_BDT,h_znn_r);
-     //RooDataHist dy("dy","dy",output_BDT,h_dy_r);
-     RooDataHist oth("oth","oth",output_BDT,h_oth_r);
-    //define pdfs 
-     RooHistPdf znn_pdf("znn_pdf","znn_pdf",output_BDT,znn);
-     RooHistPdf w_pdf("w_pdf","w_pdf",output_BDT,w);
-     RooHistPdf qcd_pdf("qcd_pdf","qcd_pdf",output_BDT,qcd);
-     RooHistPdf tt1_pdf("tt1_pdf","tt1_pdf",output_BDT,tt1);
-     RooHistPdf tt4_pdf("tt4_pdf","tt4_pdf",output_BDT,tt4);
-     RooHistPdf tt5_pdf("tt5_pdf","tt5_pdf",output_BDT,tt5);
-     //RooHistPdf dy_pdf("dy_pdf","dy_pdf",output_BDT,dy);
-     RooHistPdf oth_pdf("oth_pdf","oth_pdf",output_BDT,oth);
-     RooHistPdf sig_pdf("sig_pdf","sig_pdf",output_BDT,sig);
-    
-     
-     //define nominal yields for each process
-     double Nsig=h_m->Integral();
-     double Ntt1=h_tt1->Integral();
-     double Ntt4=h_tt4->Integral();
-     double Ntt5=h_tt5->Integral();
-     double Nw=h_w->Integral();
-     double Nqcd=h_qcd->Integral();
-     double Nznn=h_znn->Integral();
-     double Noth=h_oth->Integral();
-     double Nbkg=Ntt1+Ntt4+Ntt5+Nznn+Nw+Nqcd+Noth;
-     double Nsb=Nsig+Nbkg;
+      TLegend* leg = new TLegend(0.56,0.60,0.88,0.88);
+      leg->SetBorderSize(0);
+      leg->SetFillStyle(0);
+      leg->AddEntry(fr->findObject("toydata"),     "Pseudodata", "pe");
+      leg->AddEntry(fr->findObject("fullfit"),     "S+B fit", "l");
+      leg->AddEntry(fr->findObject("sigonly"),     "Signal", "l");
+      leg->AddEntry(fr->findObject("ttcomp"),      "TTbar", "l");
+      leg->AddEntry(fr->findObject("ttsemicomp"),  "TT semileptonic", "l");
+      leg->Draw();
 
-     //define variables and  gaussian constraints
-     RooRealVar Nexp_sig("Nexp_sig","Expected number of signal events",Nsig,-5*Nsig,5*Nsig );
-    RooRealVar Nexp_sig_th("Nexp_sig_th","Expected number of signal events",Nsig);
-    //TTBAR
-  
-    //tt5
-    RooRealVar Nexp_tt5("Nexp_tt5", "Expected number of TT5 bkg", Ntt5,-1.1*Ntt5,3.2*Ntt5);
-    //RooRealVar Nexp_tt5("Nexp_tt5", "Expected number of TT5 bkg", Ntt5);
-    RooRealVar Nexp_tt5_th("Nexp_tt5_th", "Expected number of TT  bkg", Ntt5);
-    RooGaussian tt5_constraint("tt5_constraint", "Gaussian syst  constraint on ttbar yield",Nexp_tt5, RooConst(Ntt5), RooConst(0.7*Ntt5));
-    
-    //w
-    RooRealVar Nexp_w("Nexp_w", "Expected number of W bkg", Nw,0.*Nw,1.9*Nw);
-    RooRealVar Nexp_w_th("Nexp_w_th", "Expected number of  W bkg", Nw);
-    RooGaussian w_constraint("w_constraint", "Gaussian   constraint on W yield", Nexp_w, RooConst(Nw), RooConst(0.3*Nw));
-    //qcd
-    RooRealVar Nexp_qcd("Nexp_qcd", "Expected number of QCD bkg", Nqcd,-0.5*Nqcd,2.5*Nqcd);
-    RooRealVar Nexp_qcd_th("Nexp_qcd_th", "Expected number of  QCD bkg", Nqcd);
-    RooGaussian qcd_constraint("qcd_constraint", "Gaussian constraint on qcd yield", Nexp_qcd, RooConst(Nqcd), RooConst(0.5*Nqcd));
-    
-    //z->vv
-    RooRealVar Nexp_znn("Nexp_znn", "Expected number of Zvv bkg", Nznn,0.*Nznn,1.9*Nznn);
-    RooRealVar Nexp_znn_th("Nexp_znn_th", "Expected number of Zvv bkg", Nznn);
-    RooGaussian znn_constraint("znn_constraint", "Gaussian  constraint on Zvv yield", Nexp_znn, RooConst(Nznn), RooConst(0.3*Nznn));
+      TLatex lat;
+      lat.SetNDC();
+      lat.SetTextSize(0.035);
+      lat.DrawLatex(0.15, 0.92, TString::Format("m_{a}=%d GeV", mass));
 
-    //other bkg
-    RooRealVar Nexp_oth("Nexp_oth", "Expected number of other bkg", Noth,-0.5*Noth,2.5*Noth);
-    RooRealVar Nexp_oth_th("Nexp_oth_th", "Expected number of oth bkg", Noth);
-    RooGaussian oth_constraint("oth_constraint", "Gaussian  constraint on others yield", Nexp_oth, RooConst(Noth), RooConst(0.5*Noth));
-    //init 
-    Nexp_sig.setVal(Nexp_sig_th.getVal());
-    Nexp_tt1.setVal(Nexp_tt1_th.getVal());
-    Nexp_tt4.setVal(Nexp_tt4_th.getVal());
-    Nexp_tt5.setVal(Nexp_tt5_th.getVal());
-    Nexp_znn.setVal(Nexp_znn_th.getVal());
-    Nexp_w.setVal(Nexp_w_th.getVal());
-    Nexp_qcd.setVal(Nexp_qcd_th.getVal());
-    Nexp_oth.setVal(Nexp_oth_th.getVal());
-    //define model0 (bkg only)
-    RooAddPdf model_0("model_0", "Background", RooArgList(tt1_pdf,tt4_pdf,tt5_pdf,w_pdf,znn_pdf,qcd_pdf,oth_pdf), RooArgList(Nexp_tt1,Nexp_tt4,Nexp_tt5,Nexp_w,Nexp_znn,Nexp_qcd,Nexp_oth));
-    //define model0 (s+b)
-    RooAddPdf model_1("model_1", "Signal + Background", RooArgList(sig_pdf,tt1_pdf,tt4_pdf,tt5_pdf,w_pdf,znn_pdf,qcd_pdf,oth_pdf), RooArgList(Nexp_sig,Nexp_tt1,Nexp_tt4,Nexp_tt5,Nexp_w,Nexp_znn,Nexp_qcd,Nexp_oth));
-    //model0 and model1 with costraints  
-    RooProdPdf total_model_0("total_model_0", " Background model with constraints", RooArgList(model_0,tt1_constraint,tt4_constraint,tt5_constraint,w_constraint,qcd_constraint,znn_constraint,oth_constraint));
-    RooProdPdf total_model_1("total_model_1", "Signal + Background model with constraints",RooArgList(model_1,tt1_constraint,tt4_constraint,tt5_constraint,w_constraint,qcd_constraint,znn_constraint,oth_constraint));
-    //convert model0 into roodatahist 
-     TH1* modelHist = model_0.createHistogram("totalModelHist", output_BDT, RooFit::Binning(customBinning));
-     for (int i = 1; i <= modelHist->GetNbinsX(); ++i) {
-       double binWidth = modelHist->GetBinWidth(i);
-       double binContent = modelHist->GetBinContent(i);
-       modelHist->SetBinContent(i, binContent * binWidth); // Adjust by bin width
-     }
-     //dataHist_B has  number of total events=Nbkg and has exactly the same per bin yields with the initial bdt distribution  
-     RooDataHist dataHist_B("data_hist", "Data Histogram from Model", output_BDT, modelHist );
-     //fit model1 into dataB
-     RooFitResult *fit_model_1_B_asimov = total_model_1.fitTo(dataHist_B,Save(),Extended(kTRUE),RooFit::MaxCalls(10000), Strategy(2),RooFit::Optimize(kTRUE),SumW2Error(true));
-     //compute nll
-    RooAbsReal* nll = total_model_1.createNLL(dataHist_B,RooFit::Extended(kTRUE));
-    RooMinimizer minim(*nll);
+      c_bdt->SaveAs(TString::Format("fits_and_limit_plots/pseudodata_fit_bdt_ma%d.pdf", mass));
+      delete c_bdt;
+    }
 
-    // Run the minimization
-    minim.minimize("Minuit2", "migrad");
-    minim.minos();
-    fit_model_1_B_asimov->Print("v");
-    //return to init values
-     Nexp_sig.setVal(Nexp_sig_th.getVal());
-    Nexp_tt1.setVal(Nexp_tt1_th.getVal());
-    Nexp_tt4.setVal(Nexp_tt4_th.getVal());
-    Nexp_tt5.setVal(Nexp_tt5_th.getVal());
-    Nexp_znn.setVal(Nexp_znn_th.getVal());
-    Nexp_w.setVal(Nexp_w_th.getVal());
-    Nexp_qcd.setVal(Nexp_qcd_th.getVal());
-    Nexp_oth.setVal(Nexp_oth_th.getVal());
-    
-    //data_B  has Nbkg events but has PER BIN statistical  fluctuations (so will be used in the MCMC chain)
-    RooDataHist  *data_B =model_0.generateBinned(output_BDT,Nbkg);
-    RooFitResult *fit_model_1_B = total_model_1.fitTo(*data_B,Save(),Extended(kTRUE),RooFit::MaxCalls(10000), Strategy(2),RooFit::Optimize(kTRUE));
+    // =========================================================
+    // 10c) Separate pull plot:
+    //      Pull = (Nexp - Nfit) / dNfit
+    //      shown for TTbar and TT semileptonic
+    // =========================================================
+    {
+      const int npulls = 2;
 
-    RooNLLVar* nlls = (RooNLLVar*) total_model_1.createNLL( *data_B, RooFit::Extended(kTRUE));
+      const char* labels[npulls] = {
+        "TTbar",
+        "TT semileptonic"
+      };
 
-    RooPlot* frameLS = Nexp_sig.frame();
-    //nll plot
-    // Plot the likelihood surface (profiling)
-    nlls->plotOn(frameLS, RooFit::ShiftToZero(), RooFit::PrintEvalErrors(-1));
+      double nom[npulls] = {
+        Ntt,
+        Nttsemi
+      };
 
-    // Draw the plot
-    TCanvas* canvas = new TCanvas("canvas", "Likelihood Surface", 600, 600);
-    frameLS->SetTitle("Profile Likelihood for Nexp_signal");
-    frameLS->Draw();
-    TLatex *latex = new TLatex();
-    latex->SetNDC();            // Use Normalized Device Coordinates
-    latex->SetTextSize(0.03);   // Adjust text size
-    latex->SetTextFont(42);    
-    latex->DrawLatex(0.78, 0.96, "M_{a}="+amassamass+" GeV"); 
-  
-    TCanvas* cp = new TCanvas("cp", "Fit and pulls of model 1 on B-only data", 800, 800);
-    TPad *t1 = new TPad("t1","t1", 0.0, 0.25, 1.0, 1.0);
-    // gPad->SetLogy();
-    t1->SetFillColor(0);
-    t1->SetBorderMode(0);
-    t1->SetBorderSize(2);
-    //  t1->SetTickx(1);
-    // t1->SetTicky(1);
-    t1->SetLeftMargin(0.10);
-    t1->SetRightMargin(0.05);
-    t1->SetTopMargin(0.05);
-    t1->SetBottomMargin(0.05); 
+      double fitv[npulls] = {
+        Nexp_tt.getVal(),
+        Nexp_ttsemi.getVal()
+      };
 
-    t1->SetFrameFillStyle(0);
-    t1->SetFrameBorderMode(0);
-    t1->SetFrameFillStyle(0);
-    t1->SetFrameBorderMode(0);
-    t1->Draw();
-    t1->cd();
-    RooPlot *frame_B1 = output_BDT.frame();
-    dataHist_B.plotOn(frame_B1);
-    total_model_1.plotOn(frame_B1);
-    total_model_1.plotOn(frame_B1, LineColor(kMagenta-10),Components("oth_pdf"));
-  
-    total_model_1.plotOn(frame_B1, LineColor(kGreen-9),Components("tt1_pdf"));
-    total_model_1.plotOn(frame_B1, LineColor(kGreen),Components("tt4_pdf"));
-    total_model_1.plotOn(frame_B1, LineColor(kGreen+2),Components("tt5_pdf"));
-    total_model_1.plotOn(frame_B1, LineColor(wC),Components("dy_pdf"));
-  
-    total_model_1.plotOn(frame_B1, LineColor(kBlack),LineStyle(1),Components("sig_pdf"));
-   
-  
- 
-    RooCurve* curve_2 = dynamic_cast<RooCurve*>(frame_B1->getObject(1));
+      double fite[npulls] = {
+        Nexp_tt.getError(),
+        Nexp_ttsemi.getError()
+      };
 
-    frame_B1->GetXaxis()->SetTitleSize(0);
-    frame_B1->GetXaxis()->SetTitle(0);
-    frame_B1->GetXaxis()->SetTitleOffset(0.4);
-    frame_B1->SetMaximum(1000000);
-    frame_B1->SetMinimum(0.01);
-    gPad->SetLogy();
-    frame_B1->Draw();
-    t1->Update();
-    TLegend *leg =  new TLegend(0.30,0.77,0.93,0.96, "NDC");
-    leg->SetHeader("");
-    leg->SetNColumns(3);   
-    leg->SetBorderSize(0);
-    leg->SetTextFont(42);   leg->SetTextSize(0.03);
-    leg->SetLineColor(0);   leg->SetLineStyle(1);   leg->SetLineWidth(1);
-    leg->SetFillColor(0);   leg->SetFillStyle(0);
+      double pulls[npulls];
+      double x[npulls];
+      double ex[npulls];
+      double ey[npulls];
 
-    leg->AddEntry(data_B, "Bgk only Data", "p"); 
-    leg->AddEntry(curve_2, "Fit model_1", "l")->SetLineColor(kBlue); // "l" for line
-    leg->AddEntry(data_B, "other Bkgs", "l")->SetLineColor(kMagenta-10);
-    leg->AddEntry(data_B,"t #bar{t}+light","l")->SetLineColor(kGreen-9);
-    leg->AddEntry(data_B,"t #bar{t} +c #bar{c}","l")->SetLineColor(kGreen);
-    leg->AddEntry(data_B,"t #bar{t} +b #bar{b}","l")->SetLineColor(kGreen+2);
-    leg->AddEntry(data_B,"DY","l") ->SetLineColor(wC);
-    leg->AddEntry(data_B,"Zh( M_{a}="+amass+")","l") ->SetLineColor(kBlack);
-  
-   
-    leg->Draw("SAME");
-    t1->Update();
-    cp->cd();
-    TPad *t2 = new TPad("t2", "t2",0.0,0.0, 1.0,0.25);
+      for (int i = 0; i < npulls; ++i) {
+        x[i]  = i + 1;
+        ex[i] = 0.0;
+        ey[i] = 0.0;
+        pulls[i] = (fite[i] > 0.0) ? (nom[i] - fitv[i]) / fite[i] : 0.0;
+      }
 
-    t2->SetFillColor(0);
-    t2->SetBorderMode(0);
-    t2->SetBorderSize(2);
-    t2->SetLeftMargin(0.10);     
-    t2->SetRightMargin(0.05);    
-    t2->SetTopMargin(0.02);      
-    t2->SetBottomMargin(0.40);   
-    t2->SetFrameFillStyle(0);
-    t2->SetFrameBorderMode(0);
-    t2->Draw();
-    t2->cd();
+      TCanvas* c_pull = new TCanvas("c_pull","Parameter pulls",800,600);
+      TH1F* hframe = new TH1F("hframe",";Process;Pull = (N_{exp} - N_{fit}) / #delta N_{fit}", npulls, 0.5, npulls + 0.5);
 
-    RooPlot* frame01 =output_BDT.frame();
-    dataHist_B.plotOn(frame01);
-    total_model_1.plotOn(frame01);
-    RooHist* pulls01 = frame01->pullHist(); 
-    // Create a new frame for residuals
-    RooPlot* residualFrame01 =output_BDT.frame();
-    residualFrame01->addPlotable(pulls01, "P");  // Plot the pulls
-    // Customize the residual frame
-    residualFrame01->GetYaxis()->SetTitle("Pulls"); 
-    residualFrame01->GetYaxis()->SetTitleSize(0.12); 
-    residualFrame01->GetYaxis()->SetTitleOffset(0.4); 
-    residualFrame01->GetYaxis()->SetLabelSize(0.10);  
-    residualFrame01->GetXaxis()->SetLabelSize(0.10);  
-    residualFrame01->GetXaxis()->SetTitleSize(0.15);
-    residualFrame01->GetXaxis()->SetTitleOffset(0.7);
-    // Draw the pulls frame
-    residualFrame01->Draw();
-    t2->Update();
-    // Draw a horizontal line at y = 0
-    TLine *l1 = new TLine(residualFrame01->GetXaxis()->GetXmin(), 0, residualFrame01->GetXaxis()->GetXmax(), 0);
-    l1->SetLineColor(kRed);
-    l1->SetLineWidth(2);
-    l1->Draw("same");
+      for (int i = 1; i <= npulls; ++i) {
+        hframe->GetXaxis()->SetBinLabel(i, labels[i-1]);
+      }
 
-    // Update and redraw the second pad
-    t2->Update();
-    t2->RedrawAxis();
-    t2->Update();
-    // Update the main canvas
-    cp->cd();
-    cp->RedrawAxis();
-    cp->Update();
-    cp->SaveAs("toy"+lep+"l"+sr+".pdf");
+      hframe->SetMinimum(-5.0);
+      hframe->SetMaximum(5.0);
+      hframe->Draw();
 
-    
-    Nexp_sig.setVal(Nexp_sig_th.getVal());
-    Nexp_tt1.setVal(Nexp_tt1_th.getVal());
-    Nexp_tt4.setVal(Nexp_tt4_th.getVal());
-    Nexp_tt5.setVal(Nexp_tt5_th.getVal());
-    Nexp_znn.setVal(Nexp_znn_th.getVal());
-    Nexp_w.setVal(Nexp_w_th.getVal());
-    Nexp_qcd.setVal(Nexp_qcd_th.getVal());
-    Nexp_oth.setVal(Nexp_oth_th.getVal());
-    
-    //TOWARDS EXTRACTING LIMITS:
-    
-    // Create RooWorkspace to hold models and parameters and ModelConfig
+      TGraphErrors* grPull = new TGraphErrors(npulls, x, pulls, ex, ey);
+      grPull->SetMarkerStyle(20);
+      grPull->SetMarkerSize(1.2);
+      grPull->Draw("P SAME");
+
+      TLine* l0  = new TLine(0.5,  0.0, npulls + 0.5,  0.0);
+      TLine* lp1 = new TLine(0.5,  1.0, npulls + 0.5,  1.0);
+      TLine* lm1 = new TLine(0.5, -1.0, npulls + 0.5, -1.0);
+      TLine* lp2 = new TLine(0.5,  2.0, npulls + 0.5,  2.0);
+      TLine* lm2 = new TLine(0.5, -2.0, npulls + 0.5, -2.0);
+
+      l0->SetLineColor(kBlack);
+      lp1->SetLineColor(kBlue);  lm1->SetLineColor(kBlue);
+      lp2->SetLineColor(kRed);   lm2->SetLineColor(kRed);
+
+      lp1->SetLineStyle(2); lm1->SetLineStyle(2);
+      lp2->SetLineStyle(2); lm2->SetLineStyle(2);
+
+      l0->Draw("SAME");
+      lp1->Draw("SAME");
+      lm1->Draw("SAME");
+      lp2->Draw("SAME");
+      lm2->Draw("SAME");
+
+      TLatex lat2;
+      lat2.SetNDC();
+      lat2.SetTextSize(0.035);
+      lat2.DrawLatex(0.15, 0.92, TString::Format("Post-fit pulls, m_{a}=%d GeV", mass));
+
+      c_pull->SaveAs(TString::Format("fits_and_limit_plots/pulls_ma%d.pdf", mass));
+
+      delete grPull;
+      delete hframe;
+      delete l0;
+      delete lp1;
+      delete lm1;
+      delete lp2;
+      delete lm2;
+      delete c_pull;
+    }
+
+    // =========================================================
+    // 10d) NEW: bin-by-bin pull plot like your colleague had
+    // =========================================================
+    {
+      RooPlot* frame_for_pull = output_BDT.frame();
+      data_toy_B->plotOn(frame_for_pull, Name("toydata_pull"));
+      total_model_1.plotOn(frame_for_pull, Name("fullfit_pull"));
+
+      RooHist* hpull = frame_for_pull->pullHist("toydata_pull", "fullfit_pull");
+
+      TCanvas* c_binpull = new TCanvas("c_binpull","Bin pulls",800,600);
+      RooPlot* frame_pull = output_BDT.frame();
+      frame_pull->addPlotable(hpull, "P");
+
+      frame_pull->SetTitle(TString::Format("Bin-by-bin pulls, m_{a}=%d GeV", mass));
+      frame_pull->GetXaxis()->SetTitle("BDT score");
+      frame_pull->GetYaxis()->SetTitle("Pull");
+      frame_pull->GetYaxis()->SetTitleOffset(1.2);
+      frame_pull->SetMinimum(-5.0);
+      frame_pull->SetMaximum(5.0);
+      frame_pull->Draw();
+
+      TLine* l0b  = new TLine(-1.0,  0.0, 1.0,  0.0);
+      TLine* lp1b = new TLine(-1.0,  1.0, 1.0,  1.0);
+      TLine* lm1b = new TLine(-1.0, -1.0, 1.0, -1.0);
+      TLine* lp2b = new TLine(-1.0,  2.0, 1.0,  2.0);
+      TLine* lm2b = new TLine(-1.0, -2.0, 1.0, -2.0);
+
+      l0b->SetLineColor(kBlack);
+      lp1b->SetLineColor(kBlue);  lm1b->SetLineColor(kBlue);
+      lp2b->SetLineColor(kRed);   lm2b->SetLineColor(kRed);
+
+      lp1b->SetLineStyle(2); lm1b->SetLineStyle(2);
+      lp2b->SetLineStyle(2); lm2b->SetLineStyle(2);
+
+      l0b->Draw("SAME");
+      lp1b->Draw("SAME");
+      lm1b->Draw("SAME");
+      lp2b->Draw("SAME");
+      lm2b->Draw("SAME");
+
+      TLatex latb;
+      latb.SetNDC();
+      latb.SetTextSize(0.035);
+      latb.DrawLatex(0.15, 0.92, TString::Format("Bin pulls, m_{a}=%d GeV", mass));
+
+      c_binpull->SaveAs(TString::Format("fits_and_limit_plots/bin_pulls_ma%d.pdf", mass));
+
+      delete l0b;
+      delete lp1b;
+      delete lm1b;
+      delete lp2b;
+      delete lm2b;
+      delete frame_for_pull;
+      delete frame_pull;
+      delete c_binpull;
+    }
+
+    // =========================================================
+    // 11) Workspace + ModelConfig
+    // =========================================================
     RooWorkspace wr("wr");
-    // Import models into the workspace
-    wr.import(total_model_1, RooFit::RenameConflictNodes("total_model_1"));
-
-    // Set up ModelConfig after importing models
+    wr.import(total_model_1);
     ModelConfig mc("ModelConfig", &wr);
     mc.SetPdf(*wr.pdf("total_model_1"));
     mc.SetParametersOfInterest(RooArgSet(Nexp_sig));
-    mc.SetNuisanceParameters(RooArgSet(Nexp_tt1,Nexp_tt4,Nexp_tt5,Nexp_w,Nexp_znn,Nexp_qcd,Nexp_oth));
+
+    RooArgSet nuis(Nexp_tt, Nexp_ttsemi);
+    mc.SetNuisanceParameters(nuis);
     wr.import(mc);
-    double denominator =Nsig;
-     
-      
-        //===================================================//
-      // E X P E C T E D  L I M I T  C A L C U L A T I O N //
-      //===================================================//
-       if (exp){
-	cout << "\n>>>>>> START with expected limit calculation for mass " << mass << endl;
-	cout << "\n>>>>>> Nominal value : NSignal = " << Nexp_sig.getVal() << "\n" << endl;
-	
-	// Return to the initial values of Nexpected for the next fit
-	Nexp_sig.setVal(Nexp_sig_th.getVal());
-	Nexp_tt1.setVal(Nexp_tt1_th.getVal());
-	Nexp_tt4.setVal(Nexp_tt4_th.getVal());
-	Nexp_tt5.setVal(Nexp_tt5_th.getVal());
-	Nexp_znn.setVal(Nexp_znn_th.getVal());
-	Nexp_w.setVal(Nexp_w_th.getVal());
-	Nexp_qcd.setVal(Nexp_qcd_th.getVal());
-	Nexp_oth.setVal(Nexp_oth_th.getVal());
-	ProposalHelper ph_exp;
-	ph_exp.SetVariables((RooArgSet&)fit_model_1_B_asimov->floatParsFinal());
-	ph_exp.SetCovMatrix(fit_model_1_B_asimov->covarianceMatrix());
-	ph_exp.SetUpdateProposalParameters(kTRUE); 
-	ph_exp.SetCacheSize(100);
-	ProposalFunction* pf_exp = ph_exp.GetProposalFunction();
-	
-	std::vector<double> toy_limits;
-        
-	for (int i = 0; i < Ntoys; ++i)
-	  {
-	    
-	    RooDataHist* toyData =model_0.generateBinned(output_BDT, Nbkg);
-	    MCMCCalculator toy_mcmc_calculator(*toyData, mc);
-	    toy_mcmc_calculator.SetProposalFunction(*pf_exp);
-	    toy_mcmc_calculator.SetConfidenceLevel(optMCMC.CL_95); 
-	    toy_mcmc_calculator.SetNumIters(optMCMC.numIters);
-	    toy_mcmc_calculator.SetNumBurnInSteps(optMCMC.numBurnInSteps);
-	    toy_mcmc_calculator.SetLeftSideTailFraction(0.0);
-	    
-	    MCMCInterval* toy_interval = toy_mcmc_calculator.GetInterval();
-	    double Nexp_Signal_exp_upper = toy_interval->UpperLimit(Nexp_sig);
-	    toy_limits.push_back(Nexp_Signal_exp_upper);
-	    
-	    double BR_exp = Nexp_Signal_exp_upper / denominator;
-	    toy_br_limits.push_back(BR_exp);
-	    
-	    std::cout << "\n>>>> RESULT : " << optMCMC.CL_95 * 100 << "% interval is [" << toy_interval->LowerLimit(Nexp_sig) <<  ", " << toy_interval->UpperLimit(Nexp_sig) << "] \n" << std::endl;
-	    std::cout << "\n>>>> Toy " << i + 1 << " / " << Ntoys << " | Upper limit: " << Nexp_Signal_exp_upper << " | BR: " << BR_exp << "\n" << std::endl;
-	    // toy_limits.clear();
-	    // toy_br_limits.clear();
-	  }    
-	
-	// Calculate median and sigma bands from toy limits
-	std::sort(toy_br_limits.begin(), toy_br_limits.end());
-	double expected_95_CL = toy_br_limits[Ntoys / 2];
-	expected_br_limits.push_back(expected_95_CL);
-	sigma_1_up.push_back(toy_br_limits[Ntoys*0.84] );
-	sigma_1_down.push_back( toy_br_limits[Ntoys* 0.16]);
-	sigma_2_up.push_back(toy_br_limits[Ntoys* 0.975]  );
-	sigma_2_down.push_back( toy_br_limits[Ntoys*0.025]);  }	 
-       										
+
+    // =========================================================
+    // 12) Proposal
+    // =========================================================
+    TMatrixDSym cov = fit_asimov->covarianceMatrix();
+    TMatrixDSym covSmall = scaleCovMatrix(cov, 0.20);
+
+    ProposalHelper ph;
+    ph.SetVariables((RooArgSet&)fit_asimov->floatParsFinal());
+    ph.SetCovMatrix(covSmall);
+    ph.SetUpdateProposalParameters(kTRUE);
+    ph.SetCacheSize(100);
+    ProposalFunction* pf = ph.GetProposalFunction();
+
+    // =========================================================
+    // A) Posterior plot for this mass
+    // =========================================================
+    {
+      MCMCCalculator post_mcmc(*data_asimov_B, mc);
+      post_mcmc.SetProposalFunction(*pf);
+      post_mcmc.SetConfidenceLevel(optMCMC.CL_95);
+      post_mcmc.SetNumIters(optMCMC.numIters);
+      post_mcmc.SetNumBurnInSteps(optMCMC.numBurnInSteps);
+      post_mcmc.SetLeftSideTailFraction(0.0);
+
+      MCMCInterval* post_interval = post_mcmc.GetInterval();
+
+      TCanvas* c_post = new TCanvas("c_post","Posterior",800,700);
+      MCMCIntervalPlot postPlot(*post_interval);
+      postPlot.SetLineColor(kBlue+1);
+      postPlot.Draw();
+
+      TLatex latp;
+      latp.SetNDC();
+      latp.SetTextSize(0.035);
+      latp.DrawLatex(0.16, 0.92, TString::Format("Posterior for m_{a}=%d GeV", mass));
+      latp.DrawLatex(0.16, 0.87, TString::Format("95%% upper limit = %.4g", post_interval->UpperLimit(Nexp_sig)));
+
+      c_post->SaveAs(TString::Format("fits_and_limit_plots/posterior_ma%d.pdf", mass));
+
+      delete c_post;
+      delete post_interval;
     }
-  
-  // Print the vector
-  if(exp){
-    std::cout << "exp Upper limits are  expected_br_limits {";
-    for (size_t i = 0; i <expected_br_limits.size(); ++i) {
-      std::cout << expected_br_limits[i];
-      if (i != expected_br_limits.size() - 1) {
-	std::cout << ", "; 
+
+    // =========================================================
+    // 13) Expected limits + pull distributions over toys
+    // =========================================================
+    std::vector<double> toy_br_limits;
+    toy_br_limits.reserve(Ntoys);
+
+    TH1F* h_pullDist_tt = new TH1F(
+      TString::Format("h_pullDist_tt_ma%d",mass),
+      TString::Format("TTbar pull distribution, m_{a}=%d;Pull;Toys",mass),
+      60,-5,5
+    );
+
+    TH1F* h_pullDist_ttsemi = new TH1F(
+      TString::Format("h_pullDist_ttsemi_ma%d",mass),
+      TString::Format("TT semileptonic pull distribution, m_{a}=%d;Pull;Toys",mass),
+      60,-5,5
+    );
+
+    std::cout << "\n====================================================\n";
+    std::cout << " Expected limits for m_a = " << mass << " GeV\n";
+    std::cout << " denominator (Nsig) = " << denominator << "\n";
+    std::cout << " Nbkg = " << Nbkg << "\n";
+    std::cout << "====================================================\n";
+
+    for (int it = 0; it < Ntoys; ++it) {
+      RooDataHist* toyData = total_model_0.generateBinned(
+        output_BDT,
+        RooFit::Extended(true)
+      );
+
+      // fit MODEL 0 for pull distributions
+      RooFitResult* fit_pull_toy = total_model_0.fitTo(
+        *toyData,
+        Save(),
+        Extended(kTRUE),
+        RooFit::MaxCalls(10000),
+        Strategy(1),
+        RooFit::Optimize(kTRUE),
+        RooFit::SumW2Error(kTRUE)
+      );
+
+      if (Nexp_tt.getError() > 0.0) {
+        h_pullDist_tt->Fill((Ntt - Nexp_tt.getVal()) / Nexp_tt.getError());
       }
-    }
-    std::cout << "}" << std::endl;
-    // Print the vector
-    std::cout << "Upper limits 1S up {";
-    for (size_t i = 0; i <sigma_1_up.size(); ++i) {
-      std::cout << sigma_1_up[i];
-	if (i !=sigma_1_up.size() - 1) {
-	  std::cout << ", "; 
-        }
-    }
-    std::cout << "}" << std::endl;
-    
-    
-    // Print the vector
-    std::cout << "Upper limits 1S down {";
-    for (size_t i = 0; i <sigma_1_down.size(); ++i) {
-      std::cout << sigma_1_down[i];
-      if (i !=sigma_1_down.size() - 1) {
-	std::cout << ", "; 
-        }
-    }
-    std::cout << "}" << std::endl;
-    // Print the vector
-    std::cout << "Upper limits 2S up {";
-    for (size_t i = 0; i <sigma_2_up.size(); ++i) {
-      std::cout << sigma_2_up[i];
-      if (i !=sigma_2_up.size() - 1) {
-	std::cout << ", "; 
+
+      if (Nexp_ttsemi.getError() > 0.0) {
+        h_pullDist_ttsemi->Fill((Nttsemi - Nexp_ttsemi.getVal()) / Nexp_ttsemi.getError());
       }
+
+      delete fit_pull_toy;
+
+      MCMCCalculator mcmc(*toyData, mc);
+      mcmc.SetProposalFunction(*pf);
+      mcmc.SetConfidenceLevel(optMCMC.CL_95);
+      mcmc.SetNumIters(optMCMC.numIters);
+      mcmc.SetNumBurnInSteps(optMCMC.numBurnInSteps);
+      mcmc.SetLeftSideTailFraction(0.0);
+
+      MCMCInterval* interval = mcmc.GetInterval();
+      const double Nsig_up = interval->UpperLimit(Nexp_sig);
+      const double BR_up   = Nsig_up / denominator;
+
+      toy_br_limits.push_back(BR_up);
+
+      if ((it+1) % 50 == 0) {
+        std::cout << "Toy " << (it+1) << "/" << Ntoys
+                  << "  Nsig^95 = " << Nsig_up
+                  << "  BR^95 = " << BR_up << "\n";
+      }
+
+      delete interval;
+      delete toyData;
     }
-    std::cout << "}" << std::endl;
 
-    
-    // Print the vector
-    std::cout << "Upper limits 2S down {";
-    for (size_t i = 0; i <sigma_2_down.size(); ++i) {
-      std::cout << sigma_2_down[i];
-      if (i !=sigma_2_down.size() - 1) {
-	std::cout << ", "; 
-        }
+    // =========================================================
+    // B) Save pull distribution histograms for this mass
+    //    each histogram separately, with stat + fit boxes
+    // =========================================================
+    {
+      TCanvas* c1 = new TCanvas(TString::Format("c_pullDist_tt_ma%d",mass),
+                                "TTbar pull distribution",800,600);
+      h_pullDist_tt->Fit("gaus","Q");
+      h_pullDist_tt->Draw();
+      c1->Update();
+      c1->SaveAs(TString::Format("fits_and_limit_plots/pull_distribution_ttbar_ma%d.pdf", mass));
+      delete c1;
     }
-    std::cout << "}" << std::endl;}
-   //===================================================//
-      // O B S E R V E D  L I M I T  C A L C U L A T I O N //
-      //===================================================//
-      /*  if(obs){
-       TRandom3 *rand = new TRandom3();
-       double Nobs = rand->Poisson(Nbkg);
-       RooDataSet *data_obs =model_0.generate(output_BDT,Nobs);
-       // Generate a toyMC sample from a poissonian distribution
-        TRandom3 *rand = new TRandom3(); 
-        double Nobs = rand->Poisson(Nbkg);
-        RooDataHist *dataHist_obs = total_model_0.generateBinned(output_BDT,Nobs);
- 
-      RooFitResult *fit_model_obs = total_model_1.fitTo( *dataHist_obs , RooFit::Save(), Extended(kTRUE), Strategy(2));
 
-      Nexp_sig.setVal(Nexp_sig_th.getVal());
-      Nexp_tt1.setVal(Nexp_tt1_th.getVal());
-      Nexp_tt4.setVal(Nexp_tt4_th.getVal());
-      Nexp_tt5.setVal(Nexp_tt5_th.getVal());
-      Nexp_znn.setVal(Nexp_znn_th.getVal());
-      Nexp_w.setVal(Nexp_w_th.getVal());
-      Nexp_qcd.setVal(Nexp_qcd_th.getVal());
-      Nexp_oth.setVal(Nexp_oth_th.getVal());
-      
-      
-      ProposalHelper ph_obs;
-      ph_obs.SetVariables((RooArgSet&)fit_model_obs->floatParsFinal());
-      ph_obs.SetCovMatrix(fit_model_obs->covarianceMatrix());
-      ph_obs.SetUpdateProposalParameters(kTRUE); 
-      ph_obs.SetCacheSize(100);
-      ProposalFunction* pf_obs = ph_obs.GetProposalFunction();
-
-      cout << "\n>>>>>> START with observed limit calculation for mass " << mass << endl;
-      cout << "\n>>>>>> Nominal value : NSignal = " << Nexp_sig.getVal() << "\n" << endl;
-      cout << "\n>>>>>> denominator is : = " << denominator << "\n" << endl;
-      MCMCCalculator mcmc_calculator(*data_obs, mc);
-      mcmc_calculator.SetProposalFunction(*pf_obs);
-      mcmc_calculator.SetConfidenceLevel(optMCMC.CL_95); 
-      mcmc_calculator.SetNumIters(optMCMC.numIters);
-      mcmc_calculator.SetNumBurnInSteps(optMCMC.numBurnInSteps);
-      mcmc_calculator.SetLeftSideTailFraction(0.0);
-
-      MCMCInterval* interval       = mcmc_calculator.GetInterval();
-      double Nexp_Signal_upper_obs = interval->UpperLimit(Nexp_sig);
-      double BR_obs                = Nexp_Signal_upper_obs / denominator;
-      
-      observed_limits.push_back(Nexp_Signal_upper_obs);
-      observed_br_limits.push_back(BR_obs);}*/
-  // Print the vector
-  /*  if(obs){
-    std::cout << "obs Upper limits are  observed_br_limits {";
-    for (size_t i = 0; i <observed_br_limits.size(); ++i) {
-      std::cout << observed_br_limits[i];
-      if (i !=observed_br_limits.size() - 1) {
-	std::cout << ", "; 
-        }
+    {
+      TCanvas* c2 = new TCanvas(TString::Format("c_pullDist_ttsemi_ma%d",mass),
+                                "TT semileptonic pull distribution",800,600);
+      h_pullDist_ttsemi->Fit("gaus","Q");
+      h_pullDist_ttsemi->Draw();
+      c2->Update();
+      c2->SaveAs(TString::Format("fits_and_limit_plots/pull_distribution_ttsemi_ma%d.pdf", mass));
+      delete c2;
     }
-    
-    std::cout << "}" << std::endl;}*/
+
+    std::sort(toy_br_limits.begin(), toy_br_limits.end());
+
+    auto q = [&](double p)->double {
+      const int idx = std::max(0, std::min(int(std::floor(p * (Ntoys - 1))), Ntoys - 1));
+      return toy_br_limits[idx];
+    };
+
+    const double median = q(0.50);
+    expected_br_limits.push_back(median);
+    sigma_1_br_down.push_back(q(0.16));
+    sigma_1_br_up  .push_back(q(0.84));
+    sigma_2_br_down.push_back(q(0.025));
+    sigma_2_br_up  .push_back(q(0.975));
+
+    std::cout << "\n[RESULT] m_a=" << mass
+              << "  expected BR^95 median=" << median
+              << "  (-1σ=" << q(0.16) << ", +1σ=" << q(0.84) << ")"
+              << "  (-2σ=" << q(0.025) << ", +2σ=" << q(0.975) << ")"
+              << "\n";
+
+    delete h_pullDist_tt;
+    delete h_pullDist_ttsemi;
+    delete h_ttsemi_r;
+
+    delete fit_asimov;
+    delete fit_toy;
+    delete data_asimov_B;
+    delete data_toy_B;
+
+    if (fsig)   fsig->Close();
+    if (ftt)    ftt->Close();
+    if (ftt2q)  ftt2q->Close();
+    if (fTTHbb) fTTHbb->Close();
+    if (fTTW)   fTTW->Close();
+    if (fTTZ)   fTTZ->Close();
+  }
+
+  // final vectors
+  std::cout << "\nexpected_br_limits {";
+  for (size_t i = 0; i < expected_br_limits.size(); ++i) {
+    std::cout << expected_br_limits[i] << (i+1<expected_br_limits.size()? ", ":"");
+  }
+  std::cout << "}\n";
+
+  std::cout << "sigma_1_br_down {";
+  for (size_t i = 0; i < sigma_1_br_down.size(); ++i) {
+    std::cout << sigma_1_br_down[i] << (i+1<sigma_1_br_down.size()? ", ":"");
+  }
+  std::cout << "}\n";
+
+  std::cout << "sigma_1_br_up {";
+  for (size_t i = 0; i < sigma_1_br_up.size(); ++i) {
+    std::cout << sigma_1_br_up[i] << (i+1<sigma_1_br_up.size()? ", ":"");
+  }
+  std::cout << "}\n";
+
+  std::cout << "sigma_2_br_down {";
+  for (size_t i = 0; i < sigma_2_br_down.size(); ++i) {
+    std::cout << sigma_2_br_down[i] << (i+1<sigma_2_br_down.size()? ", ":"");
+  }
+  std::cout << "}\n";
+
+  std::cout << "sigma_2_br_up {";
+  for (size_t i = 0; i < sigma_2_br_up.size(); ++i) {
+    std::cout << sigma_2_br_up[i] << (i+1<sigma_2_br_up.size()? ", ":"");
+  }
+  std::cout << "}\n";
+
+  // =========================================================
+  // C) Final expected limit plot using all masses
+  // =========================================================
+  {
+    const int n = (int)mass_points_d.size();
+
+    std::vector<double> x(n), y(n);
+    std::vector<double> exl(n,0.0), exh(n,0.0);
+    std::vector<double> eyl1(n), eyh1(n), eyl2(n), eyh2(n);
+
+    for (int i = 0; i < n; ++i) {
+      x[i] = mass_points_d[i];
+      y[i] = expected_br_limits[i];
+
+      eyl1[i] = expected_br_limits[i] - sigma_1_br_down[i];
+      eyh1[i] = sigma_1_br_up[i]      - expected_br_limits[i];
+
+      eyl2[i] = expected_br_limits[i] - sigma_2_br_down[i];
+      eyh2[i] = sigma_2_br_up[i]      - expected_br_limits[i];
+    }
+
+    TCanvas* c_lim = new TCanvas("c_lim","Expected Bayesian limits",900,700);
+
+    TGraphAsymmErrors* g2 = new TGraphAsymmErrors(
+      n, &x[0], &y[0], &exl[0], &exh[0], &eyl2[0], &eyh2[0]
+    );
+    TGraphAsymmErrors* g1 = new TGraphAsymmErrors(
+      n, &x[0], &y[0], &exl[0], &exh[0], &eyl1[0], &eyh1[0]
+    );
+    TGraph* gmed = new TGraph(n, &x[0], &y[0]);
+
+    g2->SetFillColor(kYellow);
+    g2->SetLineColor(kYellow);
+    g2->SetTitle(";m_{a} [GeV];Expected Bayesian 95% upper limit");
+
+    g1->SetFillColor(kGreen+1);
+    g1->SetLineColor(kGreen+1);
+
+    gmed->SetLineColor(kBlack);
+    gmed->SetLineWidth(2);
+    gmed->SetMarkerStyle(20);
+    gmed->SetMarkerSize(1.1);
+
+    g2->Draw("A3");
+    g1->Draw("3 SAME");
+    gmed->Draw("LP SAME");
+
+    TLegend* leglim = new TLegend(0.58,0.68,0.88,0.88);
+    leglim->SetBorderSize(0);
+    leglim->SetFillStyle(0);
+    leglim->AddEntry(gmed, "Median expected", "lp");
+    leglim->AddEntry(g1, "#pm1#sigma", "f");
+    leglim->AddEntry(g2, "#pm2#sigma", "f");
+    leglim->Draw();
+
+    TLatex latlim;
+    latlim.SetNDC();
+    latlim.SetTextSize(0.035);
+    latlim.DrawLatex(0.15, 0.92, "Expected Bayesian 95% upper limits");
+
+    c_lim->SaveAs("fits_and_limit_plots/expected_limits_bayesian.pdf");
+
+    delete leglim;
+    delete gmed;
+    delete g1;
+    delete g2;
+    delete c_lim;
+  }
 }
-
-
