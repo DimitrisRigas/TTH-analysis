@@ -1,4 +1,4 @@
-// fit_and_limits2.cc 1 background
+// fit_and_limits3.cc 1 background
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -46,7 +46,7 @@
 #include "RooStats/MCMCIntervalPlot.h"
 #include "RooStats/ProposalHelper.h"
 #include "RooStats/ProposalFunction.h"
-
+#include "RooRandom.h"
 using namespace RooFit;
 using namespace RooStats;
 
@@ -61,7 +61,7 @@ struct AnalysisOptions {
 
   double CL_95 = 0.95;
   int numIters = 10000;
-  int numBurnInSteps = 0;
+  int numBurnInSteps = 1000;
   int nbins = 5;
   double var_bins[6] = {-1.0, -0.70, -0.4, -0.08, 0.52, 1.0};
 
@@ -298,6 +298,7 @@ struct LimitSummary {
   std::vector<double> sigma_1_br_up;
   std::vector<double> sigma_2_br_down;
   std::vector<double> sigma_2_br_up;
+  std::vector<double> pseudo_observed_br_limits;
 };
 
 // ============================================================
@@ -403,7 +404,7 @@ bool buildInputHistogramsBackgroundOnly(InputFiles& files, Histograms& hs) {
 // ============================================================
 // 1) Construct RooFit model
 // ============================================================
-bool constructModel(const Histograms& hs, AnalysisModel& fm) {
+bool constructModel(int mass, const Histograms& hs, AnalysisModel& fm) {
   fm.output_BDT = new RooRealVar("output_BDT", "BDT score", -1.0, 1.0);
   fm.customBinning = new RooBinning(opt.nbins, opt.var_bins);
   fm.output_BDT->setBinning(*fm.customBinning, "customBinning");
@@ -414,10 +415,13 @@ bool constructModel(const Histograms& hs, AnalysisModel& fm) {
   fm.pdf_sig = new RooHistPdf("sig_pdf", "sig_pdf", *fm.output_BDT, *fm.dh_sig);
   fm.pdf_bkg = new RooHistPdf("bkg_pdf", "bkg_pdf", *fm.output_BDT, *fm.dh_bkg);
 
-  fm.Nexp_sig = new RooRealVar("Nexp_sig", "Expected signal events",
+ const double sigRangeScale = (mass == 30 ? 100.0 : 30.0);
+
+ fm.Nexp_sig = new RooRealVar("Nexp_sig", "Expected signal events",
                              hs.Nsig,
-                             -20.0 * std::max(1.0, hs.Nsig),
-                              20.0 * std::max(1.0, hs.Nsig));
+                             -sigRangeScale * std::max(1.0, hs.Nsig),
+                              sigRangeScale * std::max(1.0, hs.Nsig));
+ 
   fm.Nexp_bkg = new RooRealVar("Nexp_bkg", "Expected combined background",
                              hs.Nbkg, -0.5 * hs.Nbkg, 2.0 * hs.Nbkg);
   fm.bkg_nom = new RooConstVar("bkg_nom", "bkg_nom", hs.Nbkg);
@@ -480,6 +484,25 @@ RooDataHist* generateToyB(AnalysisModel& fm, const char* name = "toy_B") {
   return fm.model_0->generateBinned(
     *fm.output_BDT,
     RooFit::Extended(true),
+    RooFit::Name(name)
+  );
+}
+
+//Observed
+
+RooDataHist* generateToyBWithObservedCount(AnalysisModel& fm,
+                                           int mass,
+                                           double Nexp_nominal,
+                                           const char* name = "toy_Bobs") {
+  const int Nobs = RooRandom::randomGenerator()->Poisson(Nexp_nominal);
+
+  std::cout << "[OBSERVED-LIKE TOY] m_a=" << mass
+            << "  Nexp_nominal=" << Nexp_nominal
+            << "  Nobs_poisson=" << Nobs << "\n";
+
+  return fm.model_0->generateBinned(
+    *fm.output_BDT,
+    RooFit::NumEvents(Nobs),
     RooFit::Name(name)
   );
 }
@@ -1175,6 +1198,38 @@ void runExpectedLimitsForMass(int mass, const Histograms& hs, AnalysisModel& fm,
             << "  (-2σ=" << q(0.025) << ", +2σ=" << q(0.975) << ")\n";
 }
 
+void runPseudoObservedLimitForMass(int mass, const Histograms& hs, AnalysisModel& fm, LimitSummary& summary) {
+ RooDataHist* pseudoData =
+  generateToyBWithObservedCount(fm, mass, hs.Nbkg, TString::Format("pseudo_obs_%d", mass));
+  
+  MCMCCalculator mcmc(*pseudoData, *fm.mc);
+  mcmc.SetProposalFunction(*fm.pf);
+  mcmc.SetConfidenceLevel(opt.CL_95);
+  mcmc.SetNumIters(opt.numIters);
+  mcmc.SetNumBurnInSteps(opt.numBurnInSteps);
+  mcmc.SetLeftSideTailFraction(0.0);
+
+  MCMCInterval* interval = mcmc.GetInterval();
+  if (!interval) {
+    std::cerr << "[ERROR] pseudo-observed interval failed for mass " << mass << "\n";
+    summary.pseudo_observed_br_limits.push_back(-999.0);
+    delete pseudoData;
+    return;
+  }
+
+  const double Nsig_up = interval->UpperLimit(*fm.Nexp_sig);
+  const double BR_up   = Nsig_up / hs.denominator;
+
+  summary.pseudo_observed_br_limits.push_back(BR_up);
+
+std::cout << "[PSEUDO-OBSERVED] m_a=" << mass
+          << "  Nbkg_nominal=" << hs.Nbkg
+          << "  Nsig^95=" << Nsig_up
+          << "  BR^95=" << BR_up << "\n";
+  delete interval;
+  delete pseudoData;
+}
+
 // ============================================================
 // 5) Final expected-limit plot
 // ============================================================
@@ -1182,13 +1237,14 @@ void makeFinalLimitPlot(const LimitSummary& summary) {
   const int n = (int)summary.mass_points_d.size();
   if (n <= 0) return;
 
-  std::vector<double> x(n), y(n);
+  std::vector<double> x(n), y(n), yobs(n);
   std::vector<double> exl(n, 0.0), exh(n, 0.0);
   std::vector<double> eyl1(n), eyh1(n), eyl2(n), eyh2(n);
 
   for (int i = 0; i < n; ++i) {
     x[i] = summary.mass_points_d[i];
     y[i] = summary.expected_br_limits[i];
+    yobs[i] = summary.pseudo_observed_br_limits[i];
 
     eyl1[i] = summary.expected_br_limits[i] - summary.sigma_1_br_down[i];
     eyh1[i] = summary.sigma_1_br_up[i]      - summary.expected_br_limits[i];
@@ -1206,45 +1262,71 @@ void makeFinalLimitPlot(const LimitSummary& summary) {
     n, &x[0], &y[0], &exl[0], &exh[0], &eyl1[0], &eyh1[0]
   );
   TGraph* gmed = new TGraph(n, &x[0], &y[0]);
+  TGraph* gpseudo = new TGraph(n, &x[0], &yobs[0]);
 
   g2->SetFillColor(kYellow);
   g2->SetLineColor(kYellow);
-  g2->SetTitle(";m_{a} [GeV];Expected Bayesian 95% upper limit");
+  g2->SetTitle(";m_{a} [GeV];Bayesian 95% upper limit on BR");
 
   g1->SetFillColor(kGreen + 1);
   g1->SetLineColor(kGreen + 1);
 
   gmed->SetLineColor(kBlack);
   gmed->SetLineWidth(2);
+  gmed->SetLineStyle(2);
   gmed->SetMarkerStyle(20);
   gmed->SetMarkerSize(1.1);
 
-  g2->Draw("A3");
-  g1->Draw("3 SAME");
-  gmed->Draw("LP SAME");
+  gpseudo->SetLineColor(kRed + 1);
+  gpseudo->SetLineWidth(2);
+  gpseudo->SetMarkerStyle(24);
+  gpseudo->SetMarkerSize(1.1);
 
-  TLegend* leglim = new TLegend(0.58, 0.68, 0.88, 0.88);
-  leglim->SetBorderSize(0);
-  leglim->SetFillStyle(0);
-  leglim->AddEntry(gmed, "Median expected", "lp");
-  leglim->AddEntry(g1, "#pm1#sigma", "f");
-  leglim->AddEntry(g2, "#pm2#sigma", "f");
-  leglim->Draw();
+g2->SetMinimum(-10.0);
 
-  TLatex latlim;
-  latlim.SetNDC();
-  latlim.SetTextSize(0.035);
-  latlim.DrawLatex(0.15, 0.92, "Expected Bayesian 95% upper limits");
+g2->Draw("A3");
+g1->Draw("3 SAME");
+gmed->Draw("LP SAME");
+gpseudo->Draw("LP SAME");
 
-  c_lim->SaveAs("fits_and_limit_plots/step5_expected_limits_bayesian.pdf");
+TLegend* leglim = new TLegend(0.55, 0.64, 0.88, 0.88);
+leglim->SetBorderSize(0);
+leglim->SetFillStyle(0);
+leglim->AddEntry(gmed, "Median expected", "lp");
+leglim->AddEntry(gpseudo, "Pseudo-observed", "lp");
+leglim->AddEntry(g1, "#pm1#sigma", "f");
+leglim->AddEntry(g2, "#pm2#sigma", "f");
+leglim->Draw();
 
+TLatex latlim;
+latlim.SetNDC();
+latlim.SetTextSize(0.035);
+latlim.DrawLatex(0.15, 0.92, "Bayesian 95% upper limits");
+
+c_lim->SaveAs("fits_and_limit_plots/step5_expected_limits_bayesian.pdf");
+
+// log plot
+c_lim->Clear();
+c_lim->SetLogy();
+
+g2->SetMinimum(1e-1);
+
+g2->Draw("A3");
+g1->Draw("3 SAME");
+gmed->Draw("LP SAME");
+gpseudo->Draw("LP SAME");
+leglim->Draw();
+latlim.DrawLatex(0.15, 0.92, "Bayesian 95% upper limits");
+
+c_lim->SaveAs("fits_and_limit_plots/step5_expected_limits_bayesian_log.pdf");
+  
   delete leglim;
+  delete gpseudo;
   delete gmed;
   delete g1;
   delete g2;
   delete c_lim;
 }
-
 // ============================================================
 // Main steering function
 // ============================================================
@@ -1277,7 +1359,7 @@ std::vector<double> Nexp_sig_nominal_per_mass;
         files.close();
         return;
       }
-      constructModel(hs, fm);
+      constructModel(opt.toyStudySignalMass, hs, fm);
     } else {
       if (!buildInputHistogramsBackgroundOnly(files, hs)) {
         std::cerr << "[FATAL] Could not build background-only histograms\n";
@@ -1359,18 +1441,19 @@ std::vector<double> Nexp_sig_nominal_per_mass;
       continue;
     }
 
-    constructModel(hs_lim, fm_lim);
-Nexp_sig_nominal_per_mass.push_back(hs_lim.Nsig);
+    constructModel(mass, hs_lim, fm_lim);
+    Nexp_sig_nominal_per_mass.push_back(hs_lim.Nsig);
     RooDataHist* data_asimov_B = generateAsimovB(fm_lim);
 
     buildWorkspaceAndProposal(fm_lim, *data_asimov_B);
 
-    if (fm_lim.mc && fm_lim.pf) {
-      makePosteriorPlot(mass, fm_lim, *data_asimov_B);
-      runExpectedLimitsForMass(mass, hs_lim, fm_lim, summary);
-    } else {
-      std::cerr << "[ERROR] Workspace/proposal not built for mass " << mass << "\n";
-    }
+   if (fm_lim.mc && fm_lim.pf) {
+  makePosteriorPlot(mass, fm_lim, *data_asimov_B);
+  runExpectedLimitsForMass(mass, hs_lim, fm_lim, summary);
+  runPseudoObservedLimitForMass(mass, hs_lim, fm_lim, summary);
+} else {
+  std::cerr << "[ERROR] Workspace/proposal not built for mass " << mass << "\n";
+}
 
     delete data_asimov_B;
     delete hs_lim.h_bkg_r;
@@ -1418,6 +1501,13 @@ std::cout << "\nNexp_sig_nominal {";
 for (size_t i = 0; i < Nexp_sig_nominal_per_mass.size(); ++i) {
   std::cout << Nexp_sig_nominal_per_mass[i]
             << (i + 1 < Nexp_sig_nominal_per_mass.size() ? ", " : "");
+}
+std::cout << "}\n";
+ 
+ std::cout << "pseudo_observed_br_limits {";
+for (size_t i = 0; i < summary.pseudo_observed_br_limits.size(); ++i) {
+  std::cout << summary.pseudo_observed_br_limits[i]
+            << (i + 1 < summary.pseudo_observed_br_limits.size() ? ", " : "");
 }
 std::cout << "}\n";
   makeFinalLimitPlot(summary);
