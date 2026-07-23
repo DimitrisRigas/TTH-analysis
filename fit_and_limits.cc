@@ -1,4 +1,4 @@
-// fit_and_limits_stepwise.cc
+// fit_and_limits.cc
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -114,6 +114,14 @@ struct InputFiles {
 
   void open(int mass) {
     fsig   = TFile::Open(signalFileForMass(mass), "READ");
+    ftt    = TFile::Open("output_ttbar.root", "READ");
+    ftt2q  = TFile::Open("output_TTtoLNu2Q.root", "READ");
+    fTTHbb = TFile::Open("output_TTH_Hbb.root", "READ");
+    fTTW   = TFile::Open("output_TTW.root", "READ");
+    fTTZ   = TFile::Open("output_TTZ.root", "READ");
+  }
+
+  void openBackgroundOnly() {
     ftt    = TFile::Open("output_ttbar.root", "READ");
     ftt2q  = TFile::Open("output_TTtoLNu2Q.root", "READ");
     fTTHbb = TFile::Open("output_TTH_Hbb.root", "READ");
@@ -295,6 +303,45 @@ bool buildInputHistograms(int mass, InputFiles& files, Histograms& hs) {
 }
 
 // ============================================================
+// 1b) Construct input histograms and rebin (background only)
+// ============================================================
+bool buildInputHistogramsBackgroundOnly(InputFiles& files, Histograms& hs) {
+  files.openBackgroundOnly();
+
+  const char* HNAME = "h_BDT";
+
+  hs.h_tt    = getHistOrDie(files.ftt,    HNAME, files.ftt    ? files.ftt->GetName()    : "ttbar");
+  hs.h_tt2q  = getHistOrDie(files.ftt2q,  HNAME, files.ftt2q  ? files.ftt2q->GetName()  : "tt2q");
+  hs.h_tthbb = getHistOrDie(files.fTTHbb, HNAME, files.fTTHbb ? files.fTTHbb->GetName() : "tthbb");
+  hs.h_ttw   = getHistOrDie(files.fTTW,   HNAME, files.fTTW   ? files.fTTW->GetName()   : "ttw");
+  hs.h_ttz   = getHistOrDie(files.fTTZ,   HNAME, files.fTTZ   ? files.fTTZ->GetName()   : "ttz");
+
+  if (!hs.h_tt || !hs.h_tt2q || !hs.h_tthbb || !hs.h_ttw || !hs.h_ttz) {
+    std::cerr << "[FATAL] Missing background input histogram(s).\n";
+    return false;
+  }
+
+  hs.h_tt_r    = hs.h_tt   ->Rebin(opt.nbins, "h_tt_r",    opt.var_bins);
+  hs.h_tt2q_r  = hs.h_tt2q ->Rebin(opt.nbins, "h_tt2q_r",  opt.var_bins);
+  hs.h_tthbb_r = hs.h_tthbb->Rebin(opt.nbins, "h_tthbb_r", opt.var_bins);
+  hs.h_ttw_r   = hs.h_ttw  ->Rebin(opt.nbins, "h_ttw_r",   opt.var_bins);
+  hs.h_ttz_r   = hs.h_ttz  ->Rebin(opt.nbins, "h_ttz_r",   opt.var_bins);
+
+  hs.h_ttsemi_r = (TH1*)hs.h_tt2q_r->Clone("h_ttsemi_r");
+  hs.h_ttsemi_r->Reset();
+  hs.h_ttsemi_r->Add(hs.h_tt2q_r);
+  hs.h_ttsemi_r->Add(hs.h_tthbb_r);
+  hs.h_ttsemi_r->Add(hs.h_ttw_r);
+  hs.h_ttsemi_r->Add(hs.h_ttz_r);
+
+  hs.Ntt     = hs.h_tt_r->Integral();
+  hs.Nttsemi = hs.h_ttsemi_r->Integral();
+  hs.Nbkg    = hs.Ntt + hs.Nttsemi;
+
+  return true;
+}
+
+// ============================================================
 // 1) Construct RooFit model
 // ============================================================
 bool constructModel(const Histograms& hs, AnalysisModel& fm) {
@@ -335,11 +382,49 @@ bool constructModel(const Histograms& hs, AnalysisModel& fm) {
                              RooArgList(*fm.pdf_sig, *fm.pdf_tt, *fm.pdf_ttsemi),
                              RooArgList(*fm.Nexp_sig, *fm.Nexp_tt, *fm.Nexp_ttsemi));
 
-  fm.total_model_0 = new RooProdPdf("total_model_0", "b-only with constraints",
-                                    RooArgList(*fm.model_0, *fm.c_tt, *fm.c_ttsemi));
+  // fm.total_model_0 = new RooProdPdf("total_model_0", "b-only with constraints",
+  //                                  RooArgList(*fm.model_0, *fm.c_tt, *fm.c_ttsemi));
 
-  fm.total_model_1 = new RooProdPdf("total_model_1", "s+b with constraints",
-                                    RooArgList(*fm.model_1, *fm.c_tt, *fm.c_ttsemi));
+//  fm.total_model_1 = new RooProdPdf("total_model_1", "s+b with constraints",
+  //                                  RooArgList(*fm.model_1, *fm.c_tt, *fm.c_ttsemi));
+
+  return true;
+}
+
+// ============================================================
+// 1b) Construct RooFit model (background only)
+// ============================================================
+bool constructBackgroundOnlyModel(const Histograms& hs, AnalysisModel& fm) {
+  fm.output_BDT = new RooRealVar("output_BDT", "BDT score", -1.0, 1.0);
+  fm.customBinning = new RooBinning(opt.nbins, opt.var_bins);
+  fm.output_BDT->setBinning(*fm.customBinning, "customBinning");
+
+  fm.dh_tt     = new RooDataHist("tt",     "tt",     *fm.output_BDT, hs.h_tt_r);
+  fm.dh_ttsemi = new RooDataHist("ttsemi", "ttsemi", *fm.output_BDT, hs.h_ttsemi_r);
+
+  fm.pdf_tt     = new RooHistPdf("tt_pdf",     "tt_pdf",     *fm.output_BDT, *fm.dh_tt);
+  fm.pdf_ttsemi = new RooHistPdf("ttsemi_pdf", "ttsemi_pdf", *fm.output_BDT, *fm.dh_ttsemi);
+
+  fm.Nexp_tt = new RooRealVar("Nexp_tt", "Expected TT dileptonic",
+                              hs.Ntt, 0.0, 10.0 * std::max(1.0, hs.Ntt));
+
+  fm.Nexp_ttsemi = new RooRealVar("Nexp_ttsemi", "Expected TT semileptonic",
+                                  hs.Nttsemi, 0.0, 10.0 * std::max(1.0, hs.Nttsemi));
+
+  fm.tt_nom     = new RooConstVar("tt_nom",     "tt_nom",     hs.Ntt);
+  fm.tt_sig     = new RooConstVar("tt_sig",     "tt_sig",     safeSigma(hs.Ntt,     opt.rel_tt));
+  fm.ttsemi_nom = new RooConstVar("ttsemi_nom", "ttsemi_nom", hs.Nttsemi);
+  fm.ttsemi_sig = new RooConstVar("ttsemi_sig", "ttsemi_sig", safeSigma(hs.Nttsemi, opt.rel_ttsemi));
+
+  fm.c_tt     = new RooGaussian("c_tt",     "constraint tt",     *fm.Nexp_tt,     *fm.tt_nom,     *fm.tt_sig);
+  fm.c_ttsemi = new RooGaussian("c_ttsemi", "constraint ttsemi", *fm.Nexp_ttsemi, *fm.ttsemi_nom, *fm.ttsemi_sig);
+
+  fm.model_0 = new RooAddPdf("model_0", "Background-only (extended)",
+                             RooArgList(*fm.pdf_tt, *fm.pdf_ttsemi),
+                             RooArgList(*fm.Nexp_tt, *fm.Nexp_ttsemi));
+
+  //  fm.total_model_0 = new RooProdPdf("total_model_0", "b-only with constraints",
+  //                                   RooArgList(*fm.model_0, *fm.c_tt, *fm.c_ttsemi));
 
   return true;
 }
@@ -348,7 +433,7 @@ bool constructModel(const Histograms& hs, AnalysisModel& fm) {
 // 2) Generate pseudo-data
 // ============================================================
 RooDataHist* generateAsimovB(AnalysisModel& fm) {
-  return fm.total_model_0->generateBinned(
+  return fm.model_0->generateBinned(
     *fm.output_BDT,
     RooFit::ExpectedData(true),
     RooFit::Name("asimov_B")
@@ -356,7 +441,7 @@ RooDataHist* generateAsimovB(AnalysisModel& fm) {
 }
 
 RooDataHist* generateToyB(AnalysisModel& fm, const char* name = "toy_B") {
-  return fm.total_model_0->generateBinned(
+  return fm.model_0->generateBinned(
     *fm.output_BDT,
     RooFit::Extended(true),
     RooFit::Name(name)
@@ -367,29 +452,26 @@ RooDataHist* generateToyB(AnalysisModel& fm, const char* name = "toy_B") {
 // Fit helpers
 // ============================================================
 RooFitResult* fitSBModel(AnalysisModel& fm, RooDataHist& data) {
-  return fm.total_model_1->fitTo(
+  return fm.model_1->fitTo(
     data,
     Save(),
     Extended(kTRUE),
     RooFit::MaxCalls(20000),
     Strategy(2),
-    RooFit::Optimize(kTRUE),
-    RooFit::SumW2Error(kTRUE)
+    RooFit::Optimize(kTRUE)
   );
 }
 
 RooFitResult* fitBOnlyModel(AnalysisModel& fm, RooDataHist& data) {
-  return fm.total_model_0->fitTo(
+  return fm.model_0->fitTo(
     data,
     Save(),
     Extended(kTRUE),
     RooFit::MaxCalls(10000),
     Strategy(1),
-    RooFit::Optimize(kTRUE),
-    RooFit::SumW2Error(kTRUE)
+    RooFit::Optimize(kTRUE)
   );
 }
-
 // ============================================================
 // 3) Print one-fit outputs
 // ============================================================
@@ -410,7 +492,6 @@ void printOneFitSummary(int mass, const Histograms& hs, AnalysisModel& fm, RooFi
   std::cout << "numInvalidNLL = " << fitres->numInvalidNLL() << "\n";
 
   std::cout << "\n--- Parameters of interest / nuisance parameters ---\n";
-  //  std::cout << "Nexp_sig    = " << fm.Nexp_sig->getVal()    << " +/- " << fm.Nexp_sig->getError()    << "\n";
   std::cout << "Nexp_tt     = " << fm.Nexp_tt->getVal()     << " +/- " << fm.Nexp_tt->getError()     << "\n";
   std::cout << "Nexp_ttsemi = " << fm.Nexp_ttsemi->getVal() << " +/- " << fm.Nexp_ttsemi->getError() << "\n";
 
@@ -445,12 +526,12 @@ void plotOneToyFit(int mass, AnalysisModel& fm, RooDataHist& toyData) {
   RooPlot* fr = fm.output_BDT->frame();
 
   toyData.plotOn(fr, Name("toydata"));
-  fm.total_model_0->plotOn(fr, Name("fullfit"), LineColor(kBlue));
+  fm.model_0->plotOn(fr, Name("fullfit"), LineColor(kBlue));
 
-  fm.total_model_0->plotOn(fr, Components("tt_pdf"),
+  fm.model_0->plotOn(fr, Components("tt_pdf"),
                            LineColor(kRed + 1), LineStyle(kSolid), Name("ttcomp"));
 
-  fm.total_model_0->plotOn(fr, Components("ttsemi_pdf"),
+  fm.model_0->plotOn(fr, Components("ttsemi_pdf"),
                            LineColor(kMagenta + 1), LineStyle(kSolid), Name("ttsemicomp"));
 
   fr->SetTitle(TString::Format("One pseudodata fit (B-only), m_{a}=%d GeV", mass));
@@ -463,8 +544,8 @@ void plotOneToyFit(int mass, AnalysisModel& fm, RooDataHist& toyData) {
   leg->SetFillStyle(0);
   leg->AddEntry(fr->findObject("toydata"),    "Pseudodata", "pe");
   leg->AddEntry(fr->findObject("fullfit"),    "B-only fit", "l");
-  leg->AddEntry(fr->findObject("ttcomp"),     "t \bar{t} (dil)", "l");
-  leg->AddEntry(fr->findObject("ttsemicomp"), "t \bar{t} (semi)", "l");
+  leg->AddEntry(fr->findObject("ttcomp"),     "t #bar{t} (dil)", "l");
+  leg->AddEntry(fr->findObject("ttsemicomp"), "t #bar{t} (semi)", "l");
   leg->Draw();
 
   TLatex lat;
@@ -482,130 +563,177 @@ void plotOneToyFit(int mass, AnalysisModel& fm, RooDataHist& toyData) {
 // ============================================================
 // 4) Toy MC study for pulls
 // ============================================================
-void runToyPullStudy(int mass, const Histograms& hs, AnalysisModel& fm) {
+void runToyPullStudy(const Histograms& hs, AnalysisModel& fm) {
   TH1F* h_pullDist_tt = new TH1F(
-    TString::Format("h_pullDist_tt_ma%d", mass),
-    TString::Format("TTbar pull distribution, m_{a}=%d;Pull;Toys", mass),
+    "h_pullDist_tt_bonly",
+    "TTbar pull distribution;Pull;Toys",
     60, -5, 5
   );
-
+  
+  TH1F* h_corr_tt_ttsemi = new TH1F(
+				    "h_corr_tt_ttsemi",
+				    "Fit correlation between Nexp_tt and Nexp_ttsemi;corr(Nexp_tt, Nexp_ttsemi);Toys",
+				    100, -1.0, 1.0
+				    );
   TH1F* h_pullDist_ttsemi = new TH1F(
-    TString::Format("h_pullDist_ttsemi_ma%d", mass),
-    TString::Format("TT semileptonic pull distribution, m_{a}=%d;Pull;Toys", mass),
+    "h_pullDist_ttsemi_bonly",
+    "TT semileptonic pull distribution;Pull;Toys",
     60, -5, 5
   );
 
   TH1F* h_fitval_tt = new TH1F(
-    TString::Format("h_fitval_tt_ma%d", mass),
-    TString::Format("Fitted Nexp_tt, m_{a}=%d;Nexp_tt;Toys", mass),
+    "h_fitval_tt_bonly",
+    "Fitted Nexp_tt;Nexp_tt;Toys",
     60, 0.0, 2.0 * std::max(1.0, hs.Ntt)
   );
 
   TH1F* h_fitval_ttsemi = new TH1F(
-    TString::Format("h_fitval_ttsemi_ma%d", mass),
-    TString::Format("Fitted Nexp_ttsemi, m_{a}=%d;Nexp_ttsemi;Toys", mass),
-    60, 0.0, 2.0 * std::max(1.0, hs.Nttsemi)
+    "h_fitval_ttsemi_bonly",
+    "Fitted Nexp_ttsemi;Nexp_ttsemi;Toys",
+    100, 0.0, 5.0 * std::max(1.0, hs.Nttsemi)
   );
 
   TH1F* h_err_tt = new TH1F(
-    TString::Format("h_err_tt_ma%d", mass),
-    TString::Format("Fit error on Nexp_tt, m_{a}=%d;#sigma(Nexp_tt);Toys", mass),
+    "h_err_tt_bonly",
+    "Fit error on Nexp_tt;#sigma(Nexp_tt);Toys",
     60, 0.0, std::max(1.0, hs.Ntt)
   );
 
   TH1F* h_err_ttsemi = new TH1F(
-    TString::Format("h_err_ttsemi_ma%d", mass),
-    TString::Format("Fit error on Nexp_ttsemi, m_{a}=%d;#sigma(Nexp_ttsemi);Toys", mass),
-    60, 0.0, std::max(1.0, hs.Nttsemi)
+    "h_err_ttsemi_bonly",
+    "Fit error on Nexp_ttsemi;#sigma(Nexp_ttsemi);Toys",
+    100, 0.0, 5.0*  std::max(1.0, hs.Nttsemi)
   );
 
   int nFitFail = 0;
-
+  
+  const double Ntt_nominal     = hs.Ntt;
+  const double Nttsemi_nominal = hs.Nttsemi;
+  
   std::cout << "\n============================================================\n";
-  std::cout << " TOY MC PULL STUDY  (m_a = " << mass << " GeV)\n";
+  std::cout << " TOY MC PULL STUDY FROM model_0\n";
   std::cout << " nToys = " << opt.Ntoys_pulls << "\n";
   std::cout << "============================================================\n";
 
   for (int it = 0; it < opt.Ntoys_pulls; ++it) {
+      fm.Nexp_tt->setVal(Ntt_nominal);
+      fm.Nexp_ttsemi->setVal(Nttsemi_nominal);
     RooDataHist* toyData = generateToyB(fm, TString::Format("toy_pull_%d", it));
 
-    RooFitResult* fitres = fitBOnlyModel(fm, *toyData);
+ RooFitResult* fitres = fitBOnlyModel(fm, *toyData);
 
-    if (!fitres || fitres->status() != 0 || fitres->covQual() < 2) {
-      ++nFitFail;
-    }
+if (!fitres || fitres->status() != 0 || fitres->covQual() < 2) {
+  ++nFitFail;
+  delete fitres;
+  delete toyData;
+  continue;
+}
 
-    const double val_tt     = fm.Nexp_tt->getVal();
-    const double err_tt     = fm.Nexp_tt->getError();
-    const double val_ttsemi = fm.Nexp_ttsemi->getVal();
-    const double err_ttsemi = fm.Nexp_ttsemi->getError();
+const double val_tt     = fm.Nexp_tt->getVal();
+const double err_tt     = fm.Nexp_tt->getError();
+const double val_ttsemi = fm.Nexp_ttsemi->getVal();
+const double err_ttsemi = fm.Nexp_ttsemi->getError();
+ const double corr_tt_ttsemi = fitres->correlation(*fm.Nexp_tt, *fm.Nexp_ttsemi);
+ h_corr_tt_ttsemi->Fill(corr_tt_ttsemi);
+const double pull_tt =
+  (err_tt > 0.0) ? (hs.Ntt - val_tt) / err_tt : 999.0;
 
-    h_fitval_tt->Fill(val_tt);
-    h_fitval_ttsemi->Fill(val_ttsemi);
-    h_err_tt->Fill(err_tt);
-    h_err_ttsemi->Fill(err_ttsemi);
+const double pull_ttsemi =
+  (err_ttsemi > 0.0) ? (hs.Nttsemi - val_ttsemi) / err_ttsemi : 999.0;
 
-    if (err_tt > 0.0) {
-      h_pullDist_tt->Fill((hs.Ntt - val_tt) / err_tt);
-    }
-    if (err_ttsemi > 0.0) {
-      h_pullDist_ttsemi->Fill((hs.Nttsemi - val_ttsemi) / err_ttsemi);
-    }
+if (std::fabs(pull_tt) > 3.0 || std::fabs(pull_ttsemi) > 3.0) {
+  std::cout << "\n[TAIL TOY] it = " << it
+            << "  status = " << fitres->status()
+            << "  covQual = " << fitres->covQual()
+            << "  edm = " << fitres->edm()
+            << "\n"
+            << "  TT:     true = " << hs.Ntt
+            << "  fit = " << val_tt
+            << "  err = " << err_tt
+            << "  pull = " << pull_tt
+            << "\n"
+            << "  TTsemi: true = " << hs.Nttsemi
+            << "  fit = " << val_ttsemi
+            << "  err = " << err_ttsemi
+            << "  pull = " << pull_ttsemi
+            << "\n"
+            << "  corr(Nexp_tt, Nexp_ttsemi) = "
+            << fitres->correlation(*fm.Nexp_tt, *fm.Nexp_ttsemi)
+            << "\n";
+}
+h_fitval_tt->Fill(val_tt);
+h_fitval_ttsemi->Fill(val_ttsemi);
+h_err_tt->Fill(err_tt);
+h_err_ttsemi->Fill(err_ttsemi);
 
-    if ((it + 1) % 100 == 0) {
-      std::cout << "Toy " << (it + 1) << "/" << opt.Ntoys_pulls << "\n";
-    }
-
+if (err_tt > 0.0) {
+  h_pullDist_tt->Fill((hs.Ntt - val_tt) / err_tt);
+}
+if (err_ttsemi > 0.0) {
+  h_pullDist_ttsemi->Fill((hs.Nttsemi - val_ttsemi) / err_ttsemi);
+}
     delete fitres;
     delete toyData;
   }
-
+std::cout << "Mean corr(Nexp_tt, Nexp_ttsemi) = "
+          << h_corr_tt_ttsemi->GetMean() << "\n";
+std::cout << "RMS  corr(Nexp_tt, Nexp_ttsemi) = "
+          << h_corr_tt_ttsemi->GetRMS() << "\n";
   std::cout << "Number of problematic fits = " << nFitFail << " / " << opt.Ntoys_pulls << "\n";
-
+std::cout << "TTbar pull:    mean = " << h_pullDist_tt->GetMean()
+          << "   RMS = " << h_pullDist_tt->GetRMS() << "\n";
+std::cout << "TTsemi pull:   mean = " << h_pullDist_ttsemi->GetMean()
+          << "   RMS = " << h_pullDist_ttsemi->GetRMS() << "\n";
   {
-    TCanvas* c1 = new TCanvas(TString::Format("c_pullDist_tt_ma%d", mass), "TTbar pull", 800, 600);
-    h_pullDist_tt->Fit("gaus", "Q");
+    TCanvas* c1 = new TCanvas("c_pullDist_tt_bonly", "TTbar pull", 800, 600);
+    h_pullDist_tt->Fit("gaus", "Q", "");
     h_pullDist_tt->Draw();
-    c1->SaveAs(TString::Format("fits_and_limit_plots/step4_pull_distribution_ttbar_ma%d.pdf", mass));
+    c1->SaveAs("fits_and_limit_plots/step4_pull_distribution_ttbar_bonly.pdf");
     delete c1;
   }
 
   {
-    TCanvas* c2 = new TCanvas(TString::Format("c_pullDist_ttsemi_ma%d", mass), "TTsemi pull", 800, 600);
-    h_pullDist_ttsemi->Fit("gaus", "Q");
+    TCanvas* c2 = new TCanvas("c_pullDist_ttsemi_bonly", "TTsemi pull", 800, 600);
+    h_pullDist_ttsemi->Fit("gaus", "Q", "");
     h_pullDist_ttsemi->Draw();
-    c2->SaveAs(TString::Format("fits_and_limit_plots/step4_pull_distribution_ttsemi_ma%d.pdf", mass));
+    c2->SaveAs("fits_and_limit_plots/step4_pull_distribution_ttsemi_bonly.pdf");
     delete c2;
   }
-
   {
-    TCanvas* c3 = new TCanvas(TString::Format("c_fitval_tt_ma%d", mass), "Fitted TTbar yield", 800, 600);
+    TCanvas* c7 = new TCanvas("c_corr_tt_ttsemi", "Correlation TT vs TTsemi", 800, 600);
+    h_corr_tt_ttsemi->Draw();
+    c7->SaveAs("fits_and_limit_plots/step4_corr_tt_ttsemi.pdf");
+    delete c7;
+  }
+  
+  {
+    TCanvas* c3 = new TCanvas("c_fitval_tt_bonly", "Fitted TTbar yield", 800, 600);
     h_fitval_tt->Draw();
-    c3->SaveAs(TString::Format("fits_and_limit_plots/step4_fitval_ttbar_ma%d.pdf", mass));
+    c3->SaveAs("fits_and_limit_plots/step4_fitval_ttbar_bonly.pdf");
     delete c3;
   }
 
   {
-    TCanvas* c4 = new TCanvas(TString::Format("c_fitval_ttsemi_ma%d", mass), "Fitted TTsemi yield", 800, 600);
+    TCanvas* c4 = new TCanvas("c_fitval_ttsemi_bonly", "Fitted TTsemi yield", 800, 600);
     h_fitval_ttsemi->Draw();
-    c4->SaveAs(TString::Format("fits_and_limit_plots/step4_fitval_ttsemi_ma%d.pdf", mass));
+    c4->SaveAs("fits_and_limit_plots/step4_fitval_ttsemi_bonly.pdf");
     delete c4;
   }
 
   {
-    TCanvas* c5 = new TCanvas(TString::Format("c_err_tt_ma%d", mass), "Error TTbar yield", 800, 600);
+    TCanvas* c5 = new TCanvas("c_err_tt_bonly", "Error TTbar yield", 800, 600);
     h_err_tt->Draw();
-    c5->SaveAs(TString::Format("fits_and_limit_plots/step4_fiterr_ttbar_ma%d.pdf", mass));
+    c5->SaveAs("fits_and_limit_plots/step4_fiterr_ttbar_bonly.pdf");
     delete c5;
   }
 
   {
-    TCanvas* c6 = new TCanvas(TString::Format("c_err_ttsemi_ma%d", mass), "Error TTsemi yield", 800, 600);
+    TCanvas* c6 = new TCanvas("c_err_ttsemi_bonly", "Error TTsemi yield", 800, 600);
     h_err_ttsemi->Draw();
-    c6->SaveAs(TString::Format("fits_and_limit_plots/step4_fiterr_ttsemi_ma%d.pdf", mass));
+    c6->SaveAs("fits_and_limit_plots/step4_fiterr_ttsemi_bonly.pdf");
     delete c6;
   }
-
+  delete h_corr_tt_ttsemi;
   delete h_pullDist_tt;
   delete h_pullDist_ttsemi;
   delete h_fitval_tt;
@@ -816,77 +944,73 @@ void fit_and_limits() {
 
   LimitSummary summary;
 
-  for (size_t im = 0; im < opt.mass_points.size(); ++im) {
-    const int mass = opt.mass_points[im];
+  InputFiles files;
+  Histograms hs;
+  AnalysisModel fm;
 
-    std::cout << "\n\n############################################################\n";
-    std::cout << " Processing mass point m_a = " << mass << " GeV\n";
-    std::cout << "############################################################\n";
+  std::cout << "\n\n############################################################\n";
+  std::cout << " Background-only pull study with model_0\n";
+  std::cout << "############################################################\n";
 
-    InputFiles files;
-    Histograms hs;
-    AnalysisModel fm;
-
-    // ========================================================
-    // 1) Construct models
-    // ========================================================
-    std::cout << "\n[STEP 1] Construct input histograms and statistical model\n";
-    if (!buildInputHistograms(mass, files, hs)) {
-      std::cerr << "[FATAL] Could not build histograms for mass " << mass << "\n";
-      files.close();
-      continue;
-    }
-    constructModel(hs, fm);
-
-    // ========================================================
-    // 2) Generate pseudo-data
-    // ========================================================
-    std::cout << "[STEP 2] Generate pseudo-data\n";
-    RooDataHist* data_asimov_B = generateAsimovB(fm);
-    RooDataHist* data_toy_B    = generateToyB(fm, "toy_B");
-
-    // ========================================================
-    // 3) Perform one fit and inspect outputs
-    // ========================================================
-    std::cout << "[STEP 3] One fit and detailed output\n";
-    RooFitResult* fit_one = fitBOnlyModel(fm, *data_toy_B);
-    printOneFitSummary(mass, hs, fm, fit_one);
-    plotOneToyFit(mass, fm, *data_toy_B);
-
-    delete fit_one;
-    delete data_asimov_B;
-    delete data_toy_B;
-
-    delete hs.h_ttsemi_r;
-
-    fm.cleanup();
+  // ========================================================
+  // 1) Construct background-only model
+  // ========================================================
+  std::cout << "\n[STEP 1] Construct input histograms and background-only model\n";
+  if (!buildInputHistogramsBackgroundOnly(files, hs)) {
+    std::cerr << "[FATAL] Could not build background-only histograms\n";
     files.close();
-
     return;
-
-    // ========================================================
-    // 4) Toy MC study for pulls
-    // ========================================================
-    std::cout << "[STEP 4] Toy MC pull study\n";
-    runToyPullStudy(mass, hs, fm);
-
-    // ========================================================
-    // 5) Limits
-    // ========================================================
-    std::cout << "[STEP 5] Bayesian limits\n";
-    buildWorkspaceAndProposal(fm, *data_asimov_B);
-    makePosteriorPlot(mass, fm, *data_asimov_B);
-    runExpectedLimitsForMass(mass, hs, fm, summary);
-
-    delete fit_one;
-    delete data_asimov_B;
-    delete data_toy_B;
-
-    delete hs.h_ttsemi_r;
-
-    fm.cleanup();
-    files.close();
   }
+  constructBackgroundOnlyModel(hs, fm);
+
+  // ========================================================
+  // 2) Generate one toy pseudo-data
+  // ========================================================
+  std::cout << "[STEP 2] Generate pseudo-data\n";
+  RooDataHist* data_asimov_B = generateAsimovB(fm);
+  RooDataHist* data_toy_B    = generateToyB(fm, "toy_B");
+
+  // ========================================================
+  // 3) Perform one fit and inspect outputs
+  // ========================================================
+  std::cout << "[STEP 3] One fit and detailed output\n";
+  RooFitResult* fit_one = fitBOnlyModel(fm, *data_toy_B);
+  printOneFitSummary(0, hs, fm, fit_one);
+  plotOneToyFit(0, fm, *data_toy_B);
+
+  // ========================================================
+  // 4) Toy MC study for pulls
+  // ========================================================
+  std::cout << "[STEP 4] Toy MC pull study\n";
+  runToyPullStudy(hs, fm);
+
+  delete fit_one;
+  delete data_asimov_B;
+  delete data_toy_B;
+
+  delete hs.h_ttsemi_r;
+
+  fm.cleanup();
+  files.close();
+
+  return;
+
+  // ========================================================
+  // 5) Limits
+  // ========================================================
+  std::cout << "[STEP 5] Bayesian limits\n";
+  buildWorkspaceAndProposal(fm, *data_asimov_B);
+  makePosteriorPlot(0, fm, *data_asimov_B);
+  runExpectedLimitsForMass(0, hs, fm, summary);
+
+  delete fit_one;
+  delete data_asimov_B;
+  delete data_toy_B;
+
+  delete hs.h_ttsemi_r;
+
+  fm.cleanup();
+  files.close();
 
   std::cout << "\nexpected_br_limits {";
   for (size_t i = 0; i < summary.expected_br_limits.size(); ++i) {

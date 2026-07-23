@@ -1,23 +1,36 @@
 // overlay_signal_allbkgs.C
-// Mode-2 overlays: Signal vs ALL backgrounds at once using THStack,
+// Mode-2 overlays: Signal vs selected dominant backgrounds using THStack,
 // plus ratio pad S / (sum backgrounds).
 //
-// UPDATED: also overlays Signal tth30gev as a second signal curve (blue dashed),
-// and draws TWO ratios: S12/ΣB and S30/ΣB.
+// UPDATED AFTER MENTOR COMMENTS:
+// - Signal ttH (mA=12): black solid line, SetLineStyle(1)
+// - Signal ttH (mA=30): black dashed line, SetLineStyle(2)
+// - Legend labels fixed:
+//      Signal ttH (mA=12)
+//      Signal ttH (mA=30)
+// - Top pad has no grid.
+// - Ratio pad has GridX and GridY.
+// - Reconstructed phi plots are NOT produced.
+// - Only three backgrounds are drawn:
+//      1) TTH_Hbb
+//      2) TT dileptonic
+//      3) TT semileptonic
+// - Output PDF names are kept in the same format as before.
+// - Uses custom rebinning that preserves clean x-axis ranges.
 //
 // Run:
 //   .L overlay_signal_allbkgs.C
-//   overlay_signal_allbkgs("tth12gev", true,  true);   // shapes (unit area), keep windows
+//   overlay_signal_allbkgs("tth12gev", true,  true);   // shapes, keep windows
 //   overlay_signal_allbkgs("tth12gev", false, false);  // raw entries, close windows
 //
 // Notes:
-// - If normalize=true: each component (signal + each bkg) is unit-area normalized (shape compare).
-//   (This is your original behavior; kept unchanged.)
-// - If normalize=false: plots raw entries from each file (only meaningful if your analysis filled weighted hists).
+// - If normalize=true: each component is unit-area normalized and the y-axis is A.U.
+// - If normalize=false: plots raw entries from each file.
 // - Histograms are cloned into gROOT so files can be closed safely.
 
 #include <TFile.h>
 #include <TH1.h>
+#include <TH1D.h>
 #include <THStack.h>
 #include <TCanvas.h>
 #include <TPad.h>
@@ -28,6 +41,7 @@
 #include <TRandom.h>
 #include <TSystem.h>
 
+#include <cmath>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -43,8 +57,103 @@ struct BkgInfo {
   std::string label;
 };
 
+struct AxisRange {
+  bool use;
+  double xmin;
+  double xmax;
+};
+
 // ----------------------------------------------------------------------------
-// Clone histogram out of file into gROOT and cache it
+// Thesis-friendly fixed x-axis ranges.
+// ----------------------------------------------------------------------------
+static AxisRange GetNiceXRange(const std::string& hname) {
+  // Phi variables are kept here only for safety,
+  // but reconstructed phi plots are removed from the final histogram list.
+  if (hname.find("phi") != std::string::npos) {
+    return {true, -3.2, 3.2};
+  }
+
+  // Eta variables
+  if (hname == "h_Hdbb_eta") {
+    return {true, -5.0, 5.0};
+  }
+
+  if (hname.find("eta") != std::string::npos) {
+    return {true, -2.5, 2.5};
+  }
+
+  // Higgs candidate variables
+  if (hname == "h_Hdbb_mass") {
+    return {true, 0.0, 400.0};
+  }
+
+  if (hname == "h_Hdbb_pt") {
+    return {true, 0.0, 500.0};
+  }
+
+  // Double-b jet masses
+  if (hname == "h_dbj1_mass" || hname == "h_dbj2_mass") {
+    return {true, 0.0, 80.0};
+  }
+
+  // Double-b jet pT
+  if (hname == "h_dbj1_pt" || hname == "h_dbj2_pt") {
+    return {true, 0.0, 400.0};
+  }
+
+  // Final b-jet pT
+  if (hname == "h_bj1_pt_final" || hname == "h_bj2_pt_final") {
+    return {true, 0.0, 400.0};
+  }
+
+  // Leading lepton pT
+  if (hname == "h_lep1_pt_final") {
+    return {true, 0.0, 400.0};
+  }
+
+  // DeltaR variables
+  if (hname == "h_dR_dbj12_final" || hname == "h_dRll") {
+    return {true, 0.0, 5.0};
+  }
+
+  // Delta mass variable
+  if (hname == "h_dM_bj12_final") {
+    return {true, 0.0, 150.0};
+  }
+
+  // MET
+  if (hname == "h_MET_pt_final") {
+    return {true, 0.0, 300.0};
+  }
+
+  // HT
+  if (hname == "h_HT") {
+    return {true, 0.0, 1200.0};
+  }
+
+  // Dilepton mass
+  if (hname == "h_mll") {
+    return {true, 0.0, 200.0};
+  }
+
+  return {false, 0.0, 0.0};
+}
+
+// ----------------------------------------------------------------------------
+// Apply fixed x-axis range to an already existing histogram.
+// ----------------------------------------------------------------------------
+static void ApplyNiceXRange(TH1* h, const std::string& hname) {
+  if (!h) return;
+
+  AxisRange r = GetNiceXRange(hname);
+
+  if (r.use) {
+    h->GetXaxis()->SetRangeUser(r.xmin, r.xmax);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Clone histogram out of file into gROOT and cache it.
 // ----------------------------------------------------------------------------
 static TH1* CloneToROOT(TFile* f, const std::string& keyPrefix, const char* hname) {
   static std::unordered_map<std::string, TH1*> cache;
@@ -52,34 +161,152 @@ static TH1* CloneToROOT(TFile* f, const std::string& keyPrefix, const char* hnam
 
   const std::string key = keyPrefix + "::" + hname;
   auto it = cache.find(key);
+
   if (it != cache.end()) return it->second;
 
   TH1* h = (TH1*)f->Get(hname);
+
   if (!h) {
     std::cout << "WARNING: Missing histogram " << hname
               << " in file " << f->GetName() << std::endl;
     return nullptr;
   }
 
-  const TString uniqName = Form("%s__keep__%s__%lld", hname, keyPrefix.c_str(), ctr++);
+  const TString uniqName = Form("%s__keep__%s__%lld",
+                                hname,
+                                keyPrefix.c_str(),
+                                ctr++);
+
   TH1* hc = (TH1*)h->Clone(uniqName);
   hc->SetDirectory(gROOT);
+  hc->SetStats(0);
 
   cache[key] = hc;
   return hc;
 }
 
+// ----------------------------------------------------------------------------
+// Custom rebinning that keeps the intended smoothing while using a clean range.
+// ----------------------------------------------------------------------------
+static TH1* RebinPreserveCleanRange(TH1* h,
+                                    const std::string& hname,
+                                    const std::string& tag,
+                                    int rebinFactor) {
+  if (!h) return nullptr;
+
+  const int oldN = h->GetNbinsX();
+
+  const double oldXmin = h->GetXaxis()->GetXmin();
+  const double oldXmax = h->GetXaxis()->GetXmax();
+
+  AxisRange niceRange = GetNiceXRange(hname);
+
+  double xmin = oldXmin;
+  double xmax = oldXmax;
+
+  if (niceRange.use) {
+    xmin = niceRange.xmin;
+    xmax = niceRange.xmax;
+  }
+
+  double oldBinWidth = (oldXmax - oldXmin) / oldN;
+
+  if (oldBinWidth <= 0.0) {
+    oldBinWidth = (xmax - xmin) / oldN;
+  }
+
+  const int safeRebin = std::max(1, rebinFactor);
+  const double targetBinWidth = oldBinWidth * safeRebin;
+
+  int newN = (int)std::ceil((xmax - xmin) / targetBinWidth);
+
+  if (newN < 1) newN = 1;
+
+  TH1D* hnew = new TH1D(
+    Form("%s__plotclone_%s_%u",
+         h->GetName(),
+         tag.c_str(),
+         gRandom->Integer(1000000000)),
+    "",
+    newN,
+    xmin,
+    xmax
+  );
+
+  hnew->SetDirectory(gROOT);
+  hnew->SetStats(0);
+  hnew->Sumw2();
+
+  hnew->GetXaxis()->SetTitle(h->GetXaxis()->GetTitle());
+  hnew->GetYaxis()->SetTitle(h->GetYaxis()->GetTitle());
+
+  std::vector<double> err2(newN + 2, 0.0);
+
+  for (int ib = 1; ib <= oldN; ++ib) {
+    const double x = h->GetBinCenter(ib);
+
+    if (x < xmin || x >= xmax) continue;
+
+    const int jb = hnew->FindBin(x);
+
+    if (jb < 1 || jb > newN) continue;
+
+    const double oldContent = h->GetBinContent(ib);
+    const double oldError   = h->GetBinError(ib);
+
+    hnew->SetBinContent(jb, hnew->GetBinContent(jb) + oldContent);
+    err2[jb] += oldError * oldError;
+  }
+
+  for (int jb = 1; jb <= newN; ++jb) {
+    hnew->SetBinError(jb, std::sqrt(err2[jb]));
+  }
+
+  ApplyNiceXRange(hnew, hname);
+
+  return hnew;
+}
+
+// ----------------------------------------------------------------------------
+// Clone a histogram for one specific plot and rebin it safely.
+// ----------------------------------------------------------------------------
+static TH1* MakePlotClone(TH1* h,
+                          const std::string& hname,
+                          const std::string& tag,
+                          int ibin) {
+  if (!h) return nullptr;
+
+  TH1* hc = RebinPreserveCleanRange(h, hname, tag, ibin);
+
+  if (!hc) return nullptr;
+
+  hc->SetDirectory(gROOT);
+  hc->SetStats(0);
+
+  ApplyNiceXRange(hc, hname);
+
+  return hc;
+}
+
+// ----------------------------------------------------------------------------
+// Normalize if requested.
+// ----------------------------------------------------------------------------
 static void Prep(TH1* h, bool normalize) {
   if (!h) return;
+
   h->SetStats(0);
+
   if (normalize) {
     const double I = h->Integral();
-    if (I > 0) h->Scale(1.0 / I);
+
+    if (I > 0) {
+      h->Scale(1.0 / I);
+    }
   }
 }
 
 // ----------------------------------------------------------------------------
-// Nice axis labels/titles for each histogram key (hname)
+// Nice axis labels/titles for each histogram key.
 // ----------------------------------------------------------------------------
 static void SetNiceLabels(TH1* h, const std::string& hname, bool normalize) {
   if (!h) return;
@@ -87,211 +314,322 @@ static void SetNiceLabels(TH1* h, const std::string& hname, bool normalize) {
   h->SetTitle("");
   h->GetYaxis()->SetTitle(normalize ? "A.U." : "Entries");
 
-  if (hname == "h_Hdbb_mass")      h->GetXaxis()->SetTitle("m_{bb} (Higgs candidate) [GeV]");
-  else if (hname == "h_Hdbb_pt")   h->GetXaxis()->SetTitle("p_{T}(Higgs candidate) [GeV]");
-  else if (hname == "h_Hdbb_eta")  h->GetXaxis()->SetTitle("#eta(Higgs candidate)");
+  if (hname == "h_Hdbb_mass") {
+    h->GetXaxis()->SetTitle("m_{bb} (Higgs candidate) [GeV]");
+  }
+  else if (hname == "h_Hdbb_pt") {
+    h->GetXaxis()->SetTitle("p_{T}(Higgs candidate) [GeV]");
+  }
+  else if (hname == "h_Hdbb_eta") {
+    h->GetXaxis()->SetTitle("#eta(Higgs candidate)");
+  }
 
-  else if (hname == "h_dbj1_mass")      h->GetXaxis()->SetTitle("m(double-b jet 1) [GeV]");
-  else if (hname == "h_dbj1_pt")        h->GetXaxis()->SetTitle("p_{T}(double-b jet 1) [GeV]");
-  else if (hname == "h_dbj1_eta")       h->GetXaxis()->SetTitle("#eta(double-b jet 1)");
-  else if (hname == "h_dbj1_phi_final") h->GetXaxis()->SetTitle("#phi(double-b jet 1)");
+  else if (hname == "h_dbj1_mass") {
+    h->GetXaxis()->SetTitle("m(double-b jet 1) [GeV]");
+  }
+  else if (hname == "h_dbj1_pt") {
+    h->GetXaxis()->SetTitle("p_{T}(double-b jet 1) [GeV]");
+  }
+  else if (hname == "h_dbj1_eta") {
+    h->GetXaxis()->SetTitle("#eta(double-b jet 1)");
+  }
 
-  else if (hname == "h_dbj2_mass")      h->GetXaxis()->SetTitle("m(double-b jet 2) [GeV]");
-  else if (hname == "h_dbj2_pt")        h->GetXaxis()->SetTitle("p_{T}(double-b jet 2) [GeV]");
-  else if (hname == "h_dbj2_eta")       h->GetXaxis()->SetTitle("#eta(double-b jet 2)");
-  else if (hname == "h_dbj2_phi_final") h->GetXaxis()->SetTitle("#phi(double-b jet 2)");
+  else if (hname == "h_dbj2_mass") {
+    h->GetXaxis()->SetTitle("m(double-b jet 2) [GeV]");
+  }
+  else if (hname == "h_dbj2_pt") {
+    h->GetXaxis()->SetTitle("p_{T}(double-b jet 2) [GeV]");
+  }
+  else if (hname == "h_dbj2_eta") {
+    h->GetXaxis()->SetTitle("#eta(double-b jet 2)");
+  }
 
-  else if (hname == "h_dR_dbj12_final") h->GetXaxis()->SetTitle("#DeltaR(double-b jet 1, double-b jet 2)");
-  else if (hname == "h_dM_bj12_final")  h->GetXaxis()->SetTitle("|m(b_{1}) - m(b_{2})| [GeV]");
-  else if (hname == "h_MET_pt_final")   h->GetXaxis()->SetTitle("E_{T}^{miss} [GeV]");
-  else if (hname == "h_MET_phi_final")  h->GetXaxis()->SetTitle("#phi(E_{T}^{miss})");
-  else if (hname == "h_HT")             h->GetXaxis()->SetTitle("H_{T} (scalar #Sigma p_{T}^{jets}) [GeV]");
-  else if (hname == "h_mll")            h->GetXaxis()->SetTitle("m_{ll} [GeV]");
+  else if (hname == "h_dR_dbj12_final") {
+    h->GetXaxis()->SetTitle("#DeltaR(double-b jet 1, double-b jet 2)");
+  }
+  else if (hname == "h_dM_bj12_final") {
+    h->GetXaxis()->SetTitle("|m(b_{1}) - m(b_{2})| [GeV]");
+  }
+  else if (hname == "h_MET_pt_final") {
+    h->GetXaxis()->SetTitle("E_{T}^{miss} [GeV]");
+  }
+  else if (hname == "h_HT") {
+    h->GetXaxis()->SetTitle("H_{T} (scalar #Sigma p_{T}^{jets}) [GeV]");
+  }
+  else if (hname == "h_mll") {
+    h->GetXaxis()->SetTitle("m_{ll} [GeV]");
+  }
 
-  else if (hname == "h_bj1_pt_final")   h->GetXaxis()->SetTitle("p_{T}(b-jet 1) [GeV]");
-  else if (hname == "h_bj1_eta_final")  h->GetXaxis()->SetTitle("#eta(b-jet 1)");
-  else if (hname == "h_bj2_pt_final")   h->GetXaxis()->SetTitle("p_{T}(b-jet 2) [GeV]");
-  else if (hname == "h_bj2_eta_final")  h->GetXaxis()->SetTitle("#eta(b-jet 2)");
+  else if (hname == "h_bj1_pt_final") {
+    h->GetXaxis()->SetTitle("p_{T}(b-jet 1) [GeV]");
+  }
+  else if (hname == "h_bj1_eta_final") {
+    h->GetXaxis()->SetTitle("#eta(b-jet 1)");
+  }
+  else if (hname == "h_bj2_pt_final") {
+    h->GetXaxis()->SetTitle("p_{T}(b-jet 2) [GeV]");
+  }
+  else if (hname == "h_bj2_eta_final") {
+    h->GetXaxis()->SetTitle("#eta(b-jet 2)");
+  }
 
-  else if (hname == "h_lep1_pt_final")  h->GetXaxis()->SetTitle("p_{T}(leading lepton) [GeV]");
-  else if (hname == "h_lep1_eta_final") h->GetXaxis()->SetTitle("#eta(leading lepton)");
-  else if (hname == "h_lep1_phi_final") h->GetXaxis()->SetTitle("#phi(leading lepton)");
-  else if (hname == "h_dRll")           h->GetXaxis()->SetTitle("#DeltaR(l_{1}, l_{2})");
+  else if (hname == "h_lep1_pt_final") {
+    h->GetXaxis()->SetTitle("p_{T}(leading lepton) [GeV]");
+  }
+  else if (hname == "h_lep1_eta_final") {
+    h->GetXaxis()->SetTitle("#eta(leading lepton)");
+  }
+  else if (hname == "h_dRll") {
+    h->GetXaxis()->SetTitle("#DeltaR(l_{1}, l_{2})");
+  }
+
+  h->GetXaxis()->SetTitleSize(0.045);
+  h->GetXaxis()->SetLabelSize(0.040);
+  h->GetYaxis()->SetTitleSize(0.045);
+  h->GetYaxis()->SetLabelSize(0.040);
+  h->GetYaxis()->SetTitleOffset(1.25);
+
+  ApplyNiceXRange(h, hname);
 }
 
 // ----------------------------------------------------------------------------
-// Prettier file naming (short “physics meaning” keys)
+// Prettier file naming.
+// IMPORTANT: kept unchanged so existing Overleaf filenames still work.
 // ----------------------------------------------------------------------------
 static std::string PrettyKey(const std::string& hname) {
   if (hname == "h_Hdbb_mass") return "Higgs_mbb";
   if (hname == "h_Hdbb_pt")   return "Higgs_pt";
   if (hname == "h_Hdbb_eta")  return "Higgs_eta";
 
-  if (hname == "h_dbj1_mass")      return "dbjet1_mass";
-  if (hname == "h_dbj1_pt")        return "dbjet1_pt";
-  if (hname == "h_dbj1_eta")       return "dbjet1_eta";
-  if (hname == "h_dbj1_phi_final") return "dbjet1_phi";
+  if (hname == "h_dbj1_mass") return "dbjet1_mass";
+  if (hname == "h_dbj1_pt")   return "dbjet1_pt";
+  if (hname == "h_dbj1_eta")  return "dbjet1_eta";
 
-  if (hname == "h_dbj2_mass")      return "dbjet2_mass";
-  if (hname == "h_dbj2_pt")        return "dbjet2_pt";
-  if (hname == "h_dbj2_eta")       return "dbjet2_eta";
-  if (hname == "h_dbj2_phi_final") return "dbjet2_phi";
+  if (hname == "h_dbj2_mass") return "dbjet2_mass";
+  if (hname == "h_dbj2_pt")   return "dbjet2_pt";
+  if (hname == "h_dbj2_eta")  return "dbjet2_eta";
 
   if (hname == "h_dR_dbj12_final") return "dR_dbjets";
   if (hname == "h_dM_bj12_final")  return "dM_bjets";
   if (hname == "h_MET_pt_final")   return "MET_pt";
-  if (hname == "h_MET_phi_final")  return "MET_phi";
   if (hname == "h_HT")             return "HT";
   if (hname == "h_mll")            return "mll";
 
-  if (hname == "h_bj1_pt_final")   return "bjet1_pt";
-  if (hname == "h_bj1_eta_final")  return "bjet1_eta";
-  if (hname == "h_bj2_pt_final")   return "bjet2_pt";
-  if (hname == "h_bj2_eta_final")  return "bjet2_eta";
+  if (hname == "h_bj1_pt_final")  return "bjet1_pt";
+  if (hname == "h_bj1_eta_final") return "bjet1_eta";
+  if (hname == "h_bj2_pt_final")  return "bjet2_pt";
+  if (hname == "h_bj2_eta_final") return "bjet2_eta";
 
   if (hname == "h_lep1_pt_final")  return "lep1_pt";
   if (hname == "h_lep1_eta_final") return "lep1_eta";
-  if (hname == "h_lep1_phi_final") return "lep1_phi";
   if (hname == "h_dRll")           return "dR_ll";
 
-  return hname; // fallback
+  return hname;
 }
 
 // ----------------------------------------------------------------------------
-// Draw stacked backgrounds + TWO signal overlays with ratio pads
-// Ratio shows BOTH: S(main signalTag)/ΣB and S30/ΣB
+// Draw stacked backgrounds + two signal overlays with ratio pad.
+// Ratio shows both: S(mA=12)/ΣB and S(mA=30)/ΣB.
 // ----------------------------------------------------------------------------
 static void DrawStackWithRatio2Sig(TCanvas* c,
-                                  const char* hnameKey,
-                                  TH1* hsA_in, TH1* hsB_in,
-                                  const std::vector<TH1*>& hb_list_in,
-                                  const std::vector<std::string>& bkgLabels,
-                                  const char* sigALabel,
-                                  const char* sigBLabel,
-                                  bool normalize) {
+                                   const char* hnameKey,
+                                   TH1* hsA_in,
+                                   TH1* hsB_in,
+                                   const std::vector<TH1*>& hb_list_in,
+                                   const std::vector<std::string>& bkgLabels,
+                                   const char* sigALabel,
+                                   const char* sigBLabel,
+                                   bool normalize) {
   if (!c || !hsA_in || !hsB_in || hb_list_in.empty() || !hnameKey) return;
+
+  const std::string hname = hnameKey;
 
   c->cd();
 
-  // Create split pads on the canvas
+  c->SetGridx(0);
+  c->SetGridy(0);
+
+  // --------------------------------------------------------------------------
+  // Top pad: no grid
+  // --------------------------------------------------------------------------
   TPad* pTop = new TPad(Form("%s_top", c->GetName()), "", 0.0, 0.30, 1.0, 1.0);
   pTop->SetBottomMargin(0.02);
   pTop->SetLeftMargin(0.12);
   pTop->SetRightMargin(0.05);
   pTop->SetTopMargin(0.06);
+  pTop->SetGridx(0);
+  pTop->SetGridy(0);
   pTop->Draw();
 
+  // --------------------------------------------------------------------------
+  // Ratio pad: grid ON, as requested
+  // --------------------------------------------------------------------------
   TPad* pBot = new TPad(Form("%s_bot", c->GetName()), "", 0.0, 0.00, 1.0, 0.30);
   pBot->SetTopMargin(0.02);
   pBot->SetBottomMargin(0.35);
   pBot->SetLeftMargin(0.12);
   pBot->SetRightMargin(0.05);
+  pBot->SetGridx(1);
+  pBot->SetGridy(1);
   pBot->Draw();
 
-  // Clone signals for per-draw styling
-  TH1* hsA = (TH1*)hsA_in->Clone(Form("%s__draw_sigA__%u", hsA_in->GetName(), gRandom->Integer(1e9)));
-  TH1* hsB = (TH1*)hsB_in->Clone(Form("%s__draw_sigB__%u", hsB_in->GetName(), gRandom->Integer(1e9)));
+  TH1* hsA = (TH1*)hsA_in->Clone(Form("%s__draw_sigA__%u",
+                                      hsA_in->GetName(),
+                                      gRandom->Integer(1000000000)));
+
+  TH1* hsB = (TH1*)hsB_in->Clone(Form("%s__draw_sigB__%u",
+                                      hsB_in->GetName(),
+                                      gRandom->Integer(1000000000)));
+
   hsA->SetDirectory(gROOT);
   hsB->SetDirectory(gROOT);
+
   Prep(hsA, normalize);
   Prep(hsB, normalize);
 
-  // Build stack + sum
-  THStack* st = new THStack(Form("st_%s_%u", hnameKey, gRandom->Integer(1e9)), "");
+  SetNiceLabels(hsA, hname, normalize);
+  SetNiceLabels(hsB, hname, normalize);
+
+  THStack* st = new THStack(Form("st_%s_%u",
+                                 hnameKey,
+                                 gRandom->Integer(1000000000)), "");
+
   TH1* hbSum = nullptr;
 
-  const int colors[] = {kAzure-9, kGreen-7, kOrange-2, kMagenta-7, kCyan-7, kYellow-7,
-                        kSpring-7, kViolet-7, kTeal-7, kPink-7, kGray+1};
-  const int ncol = sizeof(colors)/sizeof(colors[0]);
+  const int colors[] = {
+    kGreen - 7,
+    kAzure - 9,
+    kOrange - 2
+  };
+
+  const int ncol = sizeof(colors) / sizeof(colors[0]);
 
   std::vector<TH1*> hb_drawn;
   hb_drawn.reserve(hb_list_in.size());
 
   for (size_t i = 0; i < hb_list_in.size(); ++i) {
     TH1* hb0 = hb_list_in[i];
+
     if (!hb0) continue;
 
-    TH1* hb = (TH1*)hb0->Clone(Form("%s__draw_bkg_%zu__%u", hb0->GetName(), i, gRandom->Integer(1e9)));
+    TH1* hb = (TH1*)hb0->Clone(Form("%s__draw_bkg_%zu__%u",
+                                    hb0->GetName(),
+                                    i,
+                                    gRandom->Integer(1000000000)));
+
     hb->SetDirectory(gROOT);
+
     Prep(hb, normalize);
+    SetNiceLabels(hb, hname, normalize);
 
     const int col = colors[i % ncol];
+
     hb->SetFillColor(col);
     hb->SetLineColor(col);
     hb->SetLineWidth(1);
+    hb->SetFillStyle(1001);
 
     st->Add(hb, "HIST");
     hb_drawn.push_back(hb);
 
     if (!hbSum) {
-      hbSum = (TH1*)hb->Clone(Form("hbSum_%s_%u", hb->GetName(), gRandom->Integer(1e9)));
+      hbSum = (TH1*)hb->Clone(Form("hbSum_%s_%u",
+                                   hb->GetName(),
+                                   gRandom->Integer(1000000000)));
       hbSum->SetDirectory(gROOT);
-    } else {
+    }
+    else {
       hbSum->Add(hb);
     }
   }
 
   if (!hbSum) return;
-  SetNiceLabels(hbSum, hnameKey, normalize);
 
-  // Signal styles (A = red solid, B = blue dashed)
+  SetNiceLabels(hbSum, hname, normalize);
+
+  // --------------------------------------------------------------------------
+  // Signal style requested by mentor
+  // --------------------------------------------------------------------------
   hsA->SetLineWidth(3);
-  hsA->SetLineColor(kRed+1);
+  hsA->SetLineColor(kBlack);
   hsA->SetLineStyle(1);
   hsA->SetFillStyle(0);
 
   hsB->SetLineWidth(3);
-  hsB->SetLineColor(kYellow+2);   // nice orange
-  hsB->SetLineStyle(1);           // solid line
+  hsB->SetLineColor(kBlack);
+  hsB->SetLineStyle(2);
   hsB->SetFillStyle(0);
- 
 
-  // TOP
+  // --------------------------------------------------------------------------
+  // Top pad drawing
+  // --------------------------------------------------------------------------
   pTop->cd();
-  pTop->SetGrid();
+  pTop->SetGridx(0);
+  pTop->SetGridy(0);
 
   hbSum->GetXaxis()->SetLabelSize(0.0);
   hbSum->GetXaxis()->SetTitleSize(0.0);
 
-  const double ymax = std::max({hsA->GetMaximum(), hsB->GetMaximum(), hbSum->GetMaximum()});
-  hbSum->SetMaximum(1.30 * ymax);
+  const double ymax = std::max({
+    hsA->GetMaximum(),
+    hsB->GetMaximum(),
+    hbSum->GetMaximum()
+  });
+
+  hbSum->SetMaximum(1.35 * ymax);
   hbSum->SetMinimum(0.0);
+
+  ApplyNiceXRange(hbSum, hname);
 
   hbSum->Draw("HIST");
   st->Draw("HIST SAME");
   hsA->Draw("HIST SAME");
   hsB->Draw("HIST SAME");
 
-  // Legend
-  TLegend* leg = new TLegend(0.75, 0.30, 0.90, 0.90);
+  hbSum->Draw("AXIS SAME");
+
+  TLegend* leg = new TLegend(0.62, 0.60, 0.92, 0.90);
   leg->SetBorderSize(0);
   leg->SetFillStyle(0);
+  leg->SetTextSize(0.032);
 
   leg->AddEntry(hsA, sigALabel, "l");
   leg->AddEntry(hsB, sigBLabel, "l");
+
   for (size_t i = 0; i < hb_drawn.size(); ++i) {
-    const std::string& lab = (i < bkgLabels.size()) ? bkgLabels[i] : std::string(Form("Bkg%zu", i));
+    const std::string& lab =
+      (i < bkgLabels.size()) ? bkgLabels[i] : std::string(Form("Bkg%zu", i));
+
     leg->AddEntry(hb_drawn[i], lab.c_str(), "f");
   }
+
   leg->Draw();
 
-  // RATIO: S / sumB for BOTH signals
+  // --------------------------------------------------------------------------
+  // Ratio pad drawing
+  // --------------------------------------------------------------------------
   pBot->cd();
-  pBot->SetGrid();
+  pBot->SetGridx(1);
+  pBot->SetGridy(1);
 
   auto makeRatio = [&](TH1* hs, const char* tag) {
-    TH1* hr = (TH1*)hs->Clone(Form("%s__ratio_%s__%u", hs->GetName(), tag, gRandom->Integer(1e9)));
+    TH1* hr = (TH1*)hs->Clone(Form("%s__ratio_%s__%u",
+                                   hs->GetName(),
+                                   tag,
+                                   gRandom->Integer(1000000000)));
+
     hr->SetDirectory(gROOT);
 
-    // Safer than hr->Divide(hbSum) (avoids inf/NaN when hbSum bin is 0)
     for (int ib = 1; ib <= hr->GetNbinsX(); ++ib) {
-      const double b = hbSum->GetBinContent(ib);
-      const double s = hs->GetBinContent(ib);
+      const double b  = hbSum->GetBinContent(ib);
+      const double s  = hs->GetBinContent(ib);
       const double es = hs->GetBinError(ib);
+
       if (b > 0) {
         hr->SetBinContent(ib, s / b);
-        hr->SetBinError(ib, es / b); // ignores bkg uncertainty (fine for quick-look)
-      } else {
+        hr->SetBinError(ib, es / b);
+      }
+      else {
         hr->SetBinContent(ib, 0.0);
         hr->SetBinError(ib, 0.0);
       }
@@ -311,6 +649,8 @@ static void DrawStackWithRatio2Sig(TCanvas* c,
     hr->GetXaxis()->SetTitleOffset(1.10);
     hr->GetXaxis()->SetTitle(hbSum->GetXaxis()->GetTitle());
 
+    ApplyNiceXRange(hr, hname);
+
     hr->SetMinimum(0.0);
     hr->SetMaximum(2.0);
 
@@ -320,49 +660,63 @@ static void DrawStackWithRatio2Sig(TCanvas* c,
   TH1* rA = makeRatio(hsA, "A");
   TH1* rB = makeRatio(hsB, "B");
 
-  rA->SetLineColor(kRed+1);
+  // Ratio styles match the signal styles
+  rA->SetLineColor(kBlack);
+  rA->SetLineStyle(1);
   rA->SetLineWidth(2);
   rA->SetMarkerStyle(20);
   rA->SetMarkerSize(0.6);
-  rA->SetMarkerColor(kRed+1);
-  
-  rB->SetLineColor(kYellow+2);
+  rA->SetMarkerColor(kBlack);
+
+  rB->SetLineColor(kBlack);
+  rB->SetLineStyle(2);
   rB->SetLineWidth(2);
   rB->SetMarkerStyle(24);
   rB->SetMarkerSize(0.6);
-  rB->SetMarkerColor(kYellow+7);
-  
-  rA->Draw("EP");
-  rB->Draw("EP SAME");
+  rB->SetMarkerColor(kBlack);
 
-  // IMPORTANT: force paint for PDF
+  rA->Draw("EPL");
+  rB->Draw("EPL SAME");
+
+  rA->Draw("AXIS SAME");
+
   c->Modified();
   c->Update();
 }
 
 // ----------------------------------------------------------------------------
-// Helper to build & save ONE histogram plot (one canvas per histogram)
+// Helper to build and save one histogram plot.
 // ----------------------------------------------------------------------------
 static void MakeOnePlotPDF(const std::string& hname,
                            TFile* fs,
                            const std::string& signalTag,
-                           TFile* fs30, // NEW: file for tth30gev
+                           TFile* fs30,
                            const std::vector<std::pair<BkgInfo,TFile*>>& obkgs,
                            bool normalize,
                            int ibin) {
-  const std::string sigLabel  = std::string("Signal ") + signalTag;
-  const std::string sig30Tag  = "tth30gev";
-  const std::string sig30Label = "Signal ttH (mA30)";
+  const std::string sigLabel   = "Signal ttH (mA=12)";
+  const std::string sig30Tag   = "tth30gev";
+  const std::string sig30Label = "Signal ttH (mA=30)";
 
-  TH1* hs  = CloneToROOT(fs,   std::string("SIG_") + signalTag, hname.c_str());
-  TH1* hs30 = CloneToROOT(fs30, std::string("SIG_") + sig30Tag, hname.c_str());
+  TH1* hs_original =
+    CloneToROOT(fs, std::string("SIG_") + signalTag, hname.c_str());
+
+  TH1* hs30_original =
+    CloneToROOT(fs30, std::string("SIG_") + sig30Tag, hname.c_str());
+
+  if (!hs_original || !hs30_original) return;
+
+  TH1* hs =
+    MakePlotClone(hs_original, hname, std::string("SIG_") + signalTag, ibin);
+
+  TH1* hs30 =
+    MakePlotClone(hs30_original, hname, std::string("SIG_") + sig30Tag, ibin);
+
   if (!hs || !hs30) return;
-
-  hs->Rebin(ibin);
-  hs30->Rebin(ibin);
 
   std::vector<TH1*> hb_list;
   std::vector<std::string> labels;
+
   hb_list.reserve(obkgs.size());
   labels.reserve(obkgs.size());
 
@@ -370,9 +724,15 @@ static void MakeOnePlotPDF(const std::string& hname,
     const BkgInfo& info = ob.first;
     TFile* fb = ob.second;
 
-    TH1* hb = CloneToROOT(fb, std::string("BKG_") + info.tag, hname.c_str());
+    TH1* hb_original =
+      CloneToROOT(fb, std::string("BKG_") + info.tag, hname.c_str());
+
+    if (!hb_original) continue;
+
+    TH1* hb =
+      MakePlotClone(hb_original, hname, std::string("BKG_") + info.tag, ibin);
+
     if (!hb) continue;
-    hb->Rebin(ibin);
 
     hb_list.push_back(hb);
     labels.push_back(info.label);
@@ -384,122 +744,178 @@ static void MakeOnePlotPDF(const std::string& hname,
   }
 
   const std::string mode = normalize ? "norm" : "raw";
-  const std::string out = "plots/" + PrettyKey(hname) + "_" + signalTag + "_plus_tth30gev_" + mode + ".pdf";
 
-  // One canvas per histogram
-  TCanvas* c = new TCanvas(Form("c_%s_%u", hname.c_str(), gRandom->Integer(1e9)),
-                           hname.c_str(), 900, 800);
+  const std::string out =
+    "plots/" + PrettyKey(hname) + "_" + signalTag + "_plus_tth30gev_" + mode + ".pdf";
 
-  DrawStackWithRatio2Sig(c, hname.c_str(), hs, hs30, hb_list, labels,
-                         sigLabel.c_str(), sig30Label.c_str(), normalize);
+  TCanvas* c = new TCanvas(Form("c_%s_%u",
+                                hname.c_str(),
+                                gRandom->Integer(1000000000)),
+                           hname.c_str(),
+                           900,
+                           800);
 
-  // Save via the CANVAS (NOT gPad) -> avoids blank PDFs
+  c->SetGridx(0);
+  c->SetGridy(0);
+
+  DrawStackWithRatio2Sig(c,
+                         hname.c_str(),
+                         hs,
+                         hs30,
+                         hb_list,
+                         labels,
+                         sigLabel.c_str(),
+                         sig30Label.c_str(),
+                         normalize);
+
   c->Modified();
   c->Update();
   c->Print(out.c_str());
+
+  gCanvases.push_back(c);
 }
 
 // ----------------------------------------------------------------------------
-// Main
+// Main.
 // ----------------------------------------------------------------------------
-void overlay_signal_allbkgs(const char* signalTag = "ttH (mA12)",
-                           bool normalize = true,
-                           bool keepWindowsOpen = true) {
+void overlay_signal_allbkgs(const char* signalTag = "tth12gev",
+                            bool normalize = true,
+                            bool keepWindowsOpen = true) {
   gStyle->SetOptStat(0);
+  gStyle->SetCanvasDefW(900);
+  gStyle->SetCanvasDefH(800);
 
-  // Make sure plots/ exists
+  // Global pads have no grid by default.
+  // Ratio pad grid is set explicitly inside DrawStackWithRatio2Sig.
+  gStyle->SetPadGridX(0);
+  gStyle->SetPadGridY(0);
+
   gSystem->mkdir("plots", kTRUE);
 
-  Int_t ibin = 4;  // rebin factor for ALL histograms
+  // Rebin factor.
+  // ibin = 6 is the best balance between noisy and over-blocky.
+  Int_t ibin = 6;
 
-  // Signal file (main)
   const std::string fSig = std::string("output_signal_") + signalTag + ".root";
+
   TFile* fs = TFile::Open(fSig.c_str(), "READ");
+
   if (!fs || fs->IsZombie()) {
     std::cout << "ERROR: cannot open signal file " << fSig << "\n";
     return;
   }
 
-  // NEW: Signal 30 file
   const std::string fSig30 = "output_signal_tth30gev.root";
+
   TFile* fs30 = TFile::Open(fSig30.c_str(), "READ");
+
   if (!fs30 || fs30->IsZombie()) {
     std::cout << "ERROR: cannot open signal30 file " << fSig30 << "\n";
-    fs->Close(); delete fs;
+    fs->Close();
+    delete fs;
     return;
   }
 
-  // Background list (edit freely)
+  // Only the three backgrounds requested by the mentor.
   std::vector<BkgInfo> bkgs = {
-    {"output_ttbar.root",            "TT_dilep",        "t#bar{t} dilepton"},
-    {"output_TTtoLNu2Q.root",        "TT_semilep",      "t#bar{t} semileptonic"},
-    {"output_DYee.root",             "DYee",            "DY#rightarrow ee"},
-    {"output_DYmumu.root",           "DYmumu",          "DY#rightarrow #mu#mu"},
-    {"output_WW.root",               "WW",              "WW"},
-    {"output_WZ.root",               "WZ",              "WZ"},
-    {"output_ZZ.root",               "ZZ",              "ZZ"},
-    {"output_TTH_Hbb.root",          "TTH_Hbb",         "ttH#rightarrow bb"},
-    {"output_VBF_Hbb.root",          "VBF_Hbb",         "VBF H#rightarrow bb"},
-    {"output_GGH_Hbb.root",          "GGH_Hbb",         "ggH H#rightarrow bb"},
-    {"output_TBbarQtoLNu.root",      "TBbarQtoLNu",     "t-channel (LNu)"},
-    {"output_TBbarQto2Q.root",       "TBbarQto2Q",      "t-channel (2Q)"},
-    {"output_TbarWplusToNu2Q.root",  "TbarWNu2Q",       "#bar{t}W (Nu2Q)"},
-    {"output_TbarWplusTo4Q.root",    "TbarW4Q",         "#bar{t}W (4Q)"}
+    {"output_TTH_Hbb.root",   "TTH_Hbb",    "t#bar{t}H, H#rightarrow b#bar{b}"},
+    {"output_ttbar.root",     "TT_dilep",   "t#bar{t} dileptonic"},
+    {"output_TTtoLNu2Q.root", "TT_semilep", "t#bar{t} semileptonic"}
   };
 
-  // Open backgrounds
   std::vector<std::pair<BkgInfo,TFile*>> obkgs;
   obkgs.reserve(bkgs.size());
 
   for (const auto& b : bkgs) {
     TFile* f = TFile::Open(b.file.c_str(), "READ");
+
     if (!f || f->IsZombie()) {
       std::cout << "WARNING: cannot open " << b.file << " (skipping)\n";
-      if (f) { f->Close(); delete f; }
+
+      if (f) {
+        f->Close();
+        delete f;
+      }
+
       continue;
     }
+
     obkgs.push_back({b, f});
   }
 
   if (obkgs.empty()) {
     std::cout << "ERROR: no background files could be opened.\n";
-    fs->Close(); delete fs;
-    fs30->Close(); delete fs30;
+    fs->Close();
+    delete fs;
+    fs30->Close();
+    delete fs30;
     return;
   }
 
-  // List ALL histograms you want to plot (one per canvas / one PDF each)
+  // Histogram list.
+  // Reconstructed phi plots are removed, as requested by the mentor.
   std::vector<std::string> allH = {
-    // Higgs
-    "h_Hdbb_mass", "h_Hdbb_pt", "h_Hdbb_eta",
+    // Higgs candidate
+    "h_Hdbb_mass",
+    "h_Hdbb_pt",
+    "h_Hdbb_eta",
 
-    // double-b jets
-    "h_dbj1_mass", "h_dbj1_pt", "h_dbj1_eta", "h_dbj1_phi_final",
-    "h_dbj2_mass", "h_dbj2_pt", "h_dbj2_eta", "h_dbj2_phi_final",
+    // Double-b jets
+    "h_dbj1_mass",
+    "h_dbj1_pt",
+    "h_dbj1_eta",
+    "h_dbj2_mass",
+    "h_dbj2_pt",
+    "h_dbj2_eta",
 
-    // pair/MET/HT
-    "h_dR_dbj12_final", "h_dM_bj12_final", "h_MET_pt_final",
-    "h_MET_phi_final", "h_HT", "h_mll",
+    // Pair/MET/HT/dilepton variables
+    "h_dR_dbj12_final",
+    "h_dM_bj12_final",
+    "h_MET_pt_final",
+    "h_HT",
+    "h_mll",
 
-    // final b-jets
-    "h_bj1_pt_final", "h_bj1_eta_final", "h_bj2_pt_final", "h_bj2_eta_final",
+    // Final b-jets
+    "h_bj1_pt_final",
+    "h_bj1_eta_final",
+    "h_bj2_pt_final",
+    "h_bj2_eta_final",
 
-    // lepton / dRll
-    "h_lep1_pt_final", "h_lep1_eta_final", "h_lep1_phi_final", "h_dRll"
+    // Lepton and dilepton angular distance
+    "h_lep1_pt_final",
+    "h_lep1_eta_final",
+    "h_dRll"
   };
 
   for (const auto& hname : allH) {
     MakeOnePlotPDF(hname, fs, signalTag, fs30, obkgs, normalize, ibin);
   }
 
-  // Close files safely (histograms are cloned to gROOT)
   for (auto& ob : obkgs) {
     ob.second->Close();
     delete ob.second;
   }
-  fs->Close();   delete fs;
-  fs30->Close(); delete fs30;
+
+  fs->Close();
+  delete fs;
+
+  fs30->Close();
+  delete fs30;
 
   std::cout << "Done. PDFs saved in ./plots/ ("
-            << (normalize ? "normalized" : "raw") << ", rebin=" << ibin << ")\n";
+            << (normalize ? "normalized" : "raw")
+            << ", clean-range rebin="
+            << ibin
+            << ")\n";
+
+  std::cout << "Note: reconstructed phi plots were not regenerated.\n";
+  std::cout << "If old phi PDFs still exist in ./plots/, remove them manually before uploading to Overleaf.\n";
+
+  if (!keepWindowsOpen) {
+    for (auto* c : gCanvases) {
+      if (c) c->Close();
+    }
+
+    gCanvases.clear();
+  }
 }
